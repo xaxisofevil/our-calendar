@@ -7,3 +7,6 @@ dist/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# Agent worktrees are throwaway scratch checkouts, not part of history
+.claude/worktrees/
