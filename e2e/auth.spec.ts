@@ -71,4 +71,20 @@ test.describe("auth", () => {
     const health = await request.get("/api/health");
     expect(health.status()).toBe(200);
   });
+
+  // Deliberately the LAST test in this file: the login rate limiter's
+  // budget lives for this isolated backend's whole test run (not reset
+  // per-test), so exhausting it here must not interfere with earlier tests
+  // that need a real successful login.
+  test("repeated failed attempts eventually get rate-limited (429), not endlessly re-tried as 401", async ({
+    request,
+  }) => {
+    let lastStatus = 0;
+    for (let i = 0; i < 15; i++) {
+      const res = await request.post("/api/auth/login", { data: { passcode: "still-wrong" } });
+      lastStatus = res.status();
+      if (lastStatus === 429) break;
+    }
+    expect(lastStatus).toBe(429);
+  });
 });

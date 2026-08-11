@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import {
   createDeviceSession,
   deleteSessionByToken,
@@ -10,6 +11,41 @@ import {
 import { requireAuth } from "../middleware/requireAuth.js";
 
 export const authRouter = Router();
+
+// §5 hardening: the passcode has no built-in throttling of its own (scrypt
+// makes each individual guess slow, but that alone doesn't stop a scripted
+// attacker from just making many parallel requests) — once port 8443 is
+// forwarded to the internet, POST /login is reachable by anyone, so it
+// needs its own limiter, not the general app traffic. Scoped to this one
+// route rather than all of /api/*, since throttling normal app usage
+// (polling, SSE, CRUD) isn't the actual threat surface.
+//
+// 10 attempts / 15 min per IP: generous enough that a real family member
+// mistyping a passphrase a few times never gets blocked, tight enough that
+// brute-forcing a multi-word passphrase (§5's recommended passcode shape)
+// is impractical. Relies on Express's `trust proxy` (set in index.ts) to
+// resolve the real client IP through Caddy's reverse proxy in production —
+// without that, every request looks like it comes from Caddy's own
+// localhost hop and the limit would be shared by every real visitor.
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Only count failed attempts toward the budget — a real family member
+  // correctly re-entering their passcode on several new devices should
+  // never risk tripping this, whatever the count. (Once the budget IS
+  // exhausted by failures, every request including a correct one is
+  // blocked until the window resets — that's the intended anti-brute-force
+  // behavior, not a bug: the limiter can't know a request is "correct"
+  // without letting it through to the handler first.)
+  skipSuccessfulRequests: true,
+  message: { error: "Too many attempts. Try again later." },
+  handler: (req, res, _next, options) => {
+    console.warn(`[auth] Rate limit hit for POST /login from ${req.ip}`);
+    res.status(options.statusCode).json(options.message);
+  },
+});
 
 // ARCHITECTURE.md §5: HttpOnly + Secure + SameSite=Lax, ~1 year. `secure:
 // true` requires https — Chromium (and this suite's Playwright runs) treats
@@ -29,7 +65,7 @@ function setSessionCookie(res: import("express").Response, token: string): void 
 
 // Mounted ahead of the app-wide `requireAuth` (see index.ts) — this is the
 // one other unauthenticated /api/* route besides GET /api/health (§12).
-authRouter.post("/login", (req, res) => {
+authRouter.post("/login", loginRateLimiter, (req, res) => {
   const passcode = typeof req.body?.passcode === "string" ? req.body.passcode : "";
   if (!verifyPasscode(passcode)) {
     // §5: no information leakage about *why* — same response whether the
