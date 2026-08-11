@@ -3,6 +3,7 @@ import { MonthGrid } from "./components/MonthGrid";
 import { DayDetailPanel } from "./components/DayDetailPanel";
 import { TodoList } from "./components/TodoList";
 import { AddEventSheet } from "./components/AddEventSheet";
+import { NotificationPrompt } from "./components/NotificationPrompt";
 import { cx } from "./lib/cx";
 import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth } from "./lib/dateUtils";
 import {
@@ -16,6 +17,23 @@ import {
   useUpdateTodo,
 } from "./lib/queries";
 import type { EventRecord, PersonRecord } from "./types";
+
+const NOTIF_PROMPT_SEEN_KEY = "our-calendar:notif-prompt-seen";
+
+function BellOutlineIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
+      <path
+        d="M10 2.5c-2.2 0-4 1.8-4 4v2.4c0 .5-.2 1-.5 1.4L4.3 12a1 1 0 0 0 .8 1.6h9.8a1 1 0 0 0 .8-1.6l-1.2-1.7c-.3-.4-.5-.9-.5-1.4V6.5c0-2.2-1.8-4-4-4Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M8.2 15.3a1.9 1.9 0 0 0 3.6 0" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function NavButton({
   label,
@@ -43,6 +61,42 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [addEventOpen, setAddEventOpen] = useState(false);
+  // M2 UI-only mock (ARCHITECTURE.md §8 / §14): `todos.due_at` isn't a real
+  // column yet and no route accepts it — this just keeps the due date the
+  // quick-add form collected, keyed by the real todo id once it comes back
+  // from the create mutation, so the interaction can be reviewed before the
+  // persistence work happens. Lost on refresh; that's expected for now.
+  const [mockDueDates, setMockDueDates] = useState<Map<number, string>>(new Map());
+
+  // M2 UI-only mock (ARCHITECTURE.md §8a): the real trigger is "first time
+  // the installed PWA is opened," which needs real install/launch detection
+  // this pass deliberately doesn't build. localStorage stands in for that —
+  // shows once per browser, and the header button lets a reviewer bring it
+  // back on demand without clearing storage by hand.
+  const [notifPromptOpen, setNotifPromptOpen] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(NOTIF_PROMPT_SEEN_KEY) !== "1") setNotifPromptOpen(true);
+    } catch {
+      setNotifPromptOpen(true);
+    }
+  }, []);
+  function dismissNotifPrompt() {
+    setNotifPromptOpen(false);
+    try {
+      localStorage.setItem(NOTIF_PROMPT_SEEN_KEY, "1");
+    } catch {
+      // localStorage unavailable — prompt just won't "remember" being dismissed across reloads
+    }
+  }
+  function previewNotifPrompt() {
+    try {
+      localStorage.removeItem(NOTIF_PROMPT_SEEN_KEY);
+    } catch {
+      // no-op
+    }
+    setNotifPromptOpen(true);
+  }
 
   const { start, end } = gridRange(monthAnchor);
   const eventsQuery = useEventsQuery(start, end);
@@ -116,6 +170,15 @@ function App() {
           <NavButton label="Next month" onClick={() => setMonthAnchor(nextMonth(monthAnchor))}>
             &rsaquo;
           </NavButton>
+          <button
+            type="button"
+            onClick={previewNotifPrompt}
+            aria-label="Preview the one-time notifications prompt (review aid, not part of the real UI)"
+            title="Preview the one-time notifications prompt"
+            className="grid h-7 w-7 flex-none cursor-pointer place-items-center rounded-full border border-dashed border-[var(--color-line)] text-[var(--color-ink-faint)]"
+          >
+            <BellOutlineIcon />
+          </button>
         </div>
       </header>
 
@@ -178,11 +241,33 @@ function App() {
 
         <TodoList
           todos={todosQuery.data ?? []}
-          onAdd={(text, notes) => createTodo.mutate({ text, notes })}
+          dueDates={mockDueDates}
+          onAdd={(text, notes, dueDate) => {
+            createTodo.mutate(
+              { text, notes },
+              {
+                onSuccess: (created) => {
+                  if (dueDate) {
+                    setMockDueDates((prev) => new Map(prev).set(created.id, dueDate));
+                  }
+                },
+              },
+            );
+          }}
           onToggle={(id, completed) => updateTodo.mutate({ id, input: { completed } })}
-          onDelete={(id) => deleteTodo.mutate(id)}
+          onDelete={(id) => {
+            deleteTodo.mutate(id);
+            setMockDueDates((prev) => {
+              if (!prev.has(id)) return prev;
+              const next = new Map(prev);
+              next.delete(id);
+              return next;
+            });
+          }}
         />
       </main>
+
+      <NotificationPrompt open={notifPromptOpen} onDismiss={dismissNotifPrompt} />
 
       <AddEventSheet
         open={addEventOpen}
