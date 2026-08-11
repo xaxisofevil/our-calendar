@@ -1,0 +1,76 @@
+/*
+ * Skin token system — CSS custom properties keyed off `[data-skin]` on
+ * <html> (see ARCHITECTURE.md §4, "Theming"). Components only ever read
+ * these tokens (via Tailwind arbitrary-value syntax, e.g. bg-(--color-bg)),
+ * never a hardcoded color/radius/font — that's what makes a future
+ * Settings → Appearance skin picker (M2) a matter of adding another
+ * `[data-skin="…"]` block, not touching component code.
+ *
+ * Only "paper-ink" is implemented for now (per current decision). The
+ * other three names below are the ones already reserved in
+ * ARCHITECTURE.md's `household_settings.skin` column so they slot in
+ * without a migration: 'bold-signal' | 'soft-dynamic' | 'quiet-glass'.
+ *
+ * Light/dark stays automatic per `prefers-color-scheme` (per-device
+ * ambient lighting), independent of which skin is active — see doc.
+ */
+
+[data-skin="paper-ink"] {
+  --color-bg: #f3ecdd;
+  --color-surface: #fbf7ec;
+  --color-ink: #2c2318;
+  --color-ink-soft: #6b5f4c;
+  --color-ink-faint: #9a8e76;
+  --color-line: #decbaa;
+  --color-accent: #b0512e;
+  --color-accent-ink: #fbf2e6;
+  --color-good: #4b6a4c;
+
+  --font-display: Charter, "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --radius-panel: 0.625rem; /* 10px */
+  --radius-control: 0.5rem; /* 8px */
+
+  /* Day-of-month numeral treatment — kept as its own tokens (not folded
+     into --font-display) because this is the one value borrowed from the
+     "Bold Signal" exploration skin: bigger + heavier than the rest of the
+     UI so the grid still reads at a glance from across the kitchen. A
+     future skin can set these independently of its own display font. */
+  --font-numeral: var(--font-display);
+  --numeral-size: 0.95rem;
+  --numeral-weight: 800;
+
+  /* Subtle paper-grain overlay, used by .skin-grain (see App.tsx root). */
+  --grain-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-skin="paper-ink"] {
+    --color-bg: #1e1811;
+    --color-surface: #2a2118;
+    --color-ink: #f1e7d3;
+    --color-ink-soft: #b7a78c;
+    --color-ink-faint: #8b7e64;
+    --color-line: #40331f;
+    --color-accent: #e07a50;
+    --color-accent-ink: #271505;
+    --color-good: #89ac87;
+  }
+}
+
+/* Paper-grain overlay: a faint tactile texture behind the whole app,
+   applied once at the root rather than per-panel. */
+.skin-grain {
+  position: relative;
+}
+.skin-grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+  background-image: var(--grain-image);
+}

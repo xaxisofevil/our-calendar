@@ -1,0 +1,71 @@
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import * as schema from "./schema.js";
+
+// backend/src/db/client.ts -> backend/data/*.sqlite, independent of cwd so
+// `npm run dev` (tsx) and `node dist/index.js` (built) both land the DB file
+// in the same place.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dataDir = path.join(__dirname, "..", "..", "data");
+fs.mkdirSync(dataDir, { recursive: true });
+const dbPath = path.join(dataDir, "our-calendar.sqlite");
+
+const sqlite = new Database(dbPath);
+sqlite.pragma("journal_mode = WAL");
+sqlite.pragma("foreign_keys = ON");
+
+// Schema init via plain SQL rather than a drizzle-kit migration pipeline —
+// pragmatic for a single-developer M1 where the schema is still moving.
+// Worth formalizing into real migrations before the M3 Google-integration
+// schema changes land (see report-back notes).
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS todos (
+    id            INTEGER PRIMARY KEY,
+    text          TEXT NOT NULL,
+    notes         TEXT,
+    completed     INTEGER NOT NULL DEFAULT 0,
+    list          TEXT NOT NULL DEFAULT 'household',
+    position      INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS people (
+    id     INTEGER PRIMARY KEY,
+    label  TEXT NOT NULL,
+    color  TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS events (
+    id                 INTEGER PRIMARY KEY,
+    person_id          INTEGER REFERENCES people(id),
+    google_account_id  INTEGER,
+    google_event_id    TEXT,
+    title              TEXT NOT NULL,
+    description        TEXT,
+    location           TEXT,
+    start_at           TEXT NOT NULL,
+    end_at             TEXT NOT NULL,
+    all_day            INTEGER NOT NULL DEFAULT 0,
+    updated_at         TEXT NOT NULL
+  );
+`);
+
+// Dev-time migration shims: if an earlier run of this app created a table
+// before a column existed, add the column now instead of requiring a manual
+// reset (SQLite dev DB, pre-migrations — cheapest safe path; see the
+// "schema init via raw SQL" note above).
+function ensureColumn(table: string, column: string, ddl: string) {
+  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl};`);
+  }
+}
+ensureColumn("todos", "notes", "notes TEXT");
+ensureColumn("events", "person_id", "person_id INTEGER REFERENCES people(id)");
+
+export const db = drizzle(sqlite, { schema });
+export { sqlite };

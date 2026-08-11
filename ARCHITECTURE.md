@@ -12,7 +12,7 @@ The smallest thing your wife will actually use every day, with nothing else buil
 
 - Custom month calendar view (fridge tablet + iPhone)
 - Tap a day → see that day's events
-- Google Calendar is the source of truth; app reads and writes to it
+- The app's own database is the source of truth for events (revised — see §7, this reverses the original plan to sync through Google Calendar)
 - Shared, dateless household to-do list, syncing instantly across devices
 - Installable iPhone PWA — tap icon, use, leave
 - Lightweight auth + remote access, no VPN, no second app
@@ -47,11 +47,11 @@ Dev and prod run the **same code**, same SQLite-backed Node process — the only
                          │        │                      │
                          │        └─▶ Node/Express API    │
                          │             │      │          │
-                         │             │      └─▶ SQLite  │
-                         │             │                  │
-                         │             ├─▶ Google Calendar API
+                         │             │      └─▶ SQLite  │ ◀── source of truth
+                         │             │                  │     for events + todos
                          │             ├─▶ Deepgram API (v2)
-                         │             └─▶ Ollama (local LLM, v2)
+                         │             ├─▶ Ollama (local LLM, v2)
+                         │             └─▶ MCP server (stdio, local CLI access)
                          └───────────────────────────────┘
 
   Internet ── DuckDNS ──▶ Raspberry Pi :8123 (Home Assistant — unrelated,
@@ -59,6 +59,9 @@ Dev and prod run the **same code**, same SQLite-backed Node process — the only
 
 Clients: fridge Android tablet (kiosk browser) · your wife's iPhone (installed PWA) · your Android phone
 All clients talk to ONE origin: https://ericb.duckdns.org:8443
+
+(No Google Calendar API in this diagram — SQLite is authoritative, not a
+cache in front of Google. See §7.)
 ```
 
 Single monolith backend, single SQLite file, single frontend bundle served same-origin as the API. No microservices, no message queue, no separate auth server — none of that buys anything at this scale and each would just be more to keep running on a home PC.
@@ -82,7 +85,7 @@ Why this over the alternatives:
 
 **ORM: Drizzle**, not Prisma — lighter, SQL-shaped, no code-gen daemon, plays well with better-sqlite3's synchronous API (simpler than async drivers for a single-file local DB).
 
-**Real-time sync: Server-Sent Events (SSE), not WebSockets.** The only thing that needs to be "instant" is other devices finding out the to-do list or calendar changed. That's one-directional (server → client) push of a small "something changed, refetch" signal. SSE gives you that with a plain `EventSource` on the client (auto-reconnects natively, no heartbeat/reconnect logic to write) and a single open HTTP response on the server. WebSockets would add a protocol, a library, and reconnection handling for a bidirectional channel you don't need — mutations still just go over normal POST/PATCH requests. Client pattern: mutate → optimistic UI update locally → server broadcasts an SSE event → all *other* connected clients refetch via their query cache. No CRDTs, no merge logic, no offline write queue — Google Calendar and SQLite stay the single source of truth and every client just re-reads it.
+**Real-time sync: Server-Sent Events (SSE), not WebSockets.** The only thing that needs to be "instant" is other devices finding out the to-do list or calendar changed. That's one-directional (server → client) push of a small "something changed, refetch" signal. SSE gives you that with a plain `EventSource` on the client (auto-reconnects natively, no heartbeat/reconnect logic to write) and a single open HTTP response on the server. WebSockets would add a protocol, a library, and reconnection handling for a bidirectional channel you don't need — mutations still just go over normal POST/PATCH requests. Client pattern: mutate → optimistic UI update locally → server broadcasts an SSE event → all *other* connected clients refetch via their query cache. No CRDTs, no merge logic, no offline write queue — SQLite stays the single source of truth and every client just re-reads it.
 
 **Static frontend serving:** Caddy serves the built frontend files directly from disk (not proxied through Node) and reverse-proxies `/api/*` and `/api/stream` to the Node process. Simpler and faster than routing static assets through Express.
 
@@ -122,18 +125,13 @@ Sequencing: the token system and all skins are wired up during M1 (styling cost 
 
 ## 5. Authentication & Security Boundaries — challenging the brief a bit
 
-Two *separate* concerns get conflated if you're not careful, and I want to split them explicitly:
-
-1. **Who's allowed to authorize *Google Calendar data access*** (a one-time, per-Google-account thing)
-2. **Who's allowed to *use the dashboard app* day-to-day** (needs to be frictionless — tap icon and go)
-
-**Calendar authorization:** each Google account you want represented on the calendar (yours, and your wife's if she has her own) goes through Google's OAuth consent screen **once**, during setup, from any browser. The resulting refresh token is stored server-side (encrypted at rest) in a `google_accounts` table designed to hold **one or many** accounts from day one — so it doesn't matter today whether you use a single shared family calendar or two personal ones that get merged; connecting a second account later is just running the same one-time flow again, no schema change. I'm not blocking the design on which of those you currently use.
+This section originally split two concerns — authorizing Google Calendar data access vs. authorizing daily app use. Since §7 dropped Google Calendar as a dependency, only the second concern is real right now; the OAuth-authorization paragraph that used to live here is gone (no `google_accounts` table, no per-account consent flow — nothing to build). If Google integration is ever revisited, that's a self-contained addition to make at the time, not something v1/v2 needs to carry.
 
 **App access (daily use):** this should **not** require Google sign-in every day, and it should **not** be one shared static password living forever with no revocation story either. The middle ground: a **long-lived device session** — visit the URL once, enter a shared setup passcode, get an HttpOnly `Secure` cookie valid for ~1 year. After that, the tablet and your wife's installed PWA are just permanently signed in — exactly the "tap and leave" experience required. This is a deliberate departure from HTTP Basic Auth at the reverse-proxy layer, which is the "simple" default I'd otherwise reach for — **iOS Safari's standalone (home-screen) PWA mode handles Basic Auth prompts unreliably**, so it actively fights the "installable iPhone PWA" requirement. An app-level cookie session avoids that entirely.
 
 **Security boundaries:**
 - Internet only ever reaches Caddy (TLS termination); the Node process isn't directly exposed.
-- OAuth tokens and the session-passcode hash are encrypted/hashed at rest, never sent to the frontend.
+- The session-passcode hash is hashed at rest, never sent to the frontend (no OAuth tokens exist to protect — see §7).
 - No CORS needed — frontend and API are same-origin behind Caddy.
 - (v2) The LLM never executes code or touches the DB directly — see §9.
 - Home Assistant is out of scope for this app entirely — no code path in this project talks to it, so it's not part of the dashboard's security boundary at all.
@@ -142,7 +140,7 @@ Two *separate* concerns get conflated if you're not careful, and I want to split
 
 ## 6. Networking & Deployment
 
-**Dev:** `npm run dev` runs Vite (frontend, hot reload) and the Express server (tsx watch) locally on your PC, both pointed at a local SQLite file. A dev-mode Google OAuth client with a `localhost` redirect URI lets you exercise real Calendar API calls while developing. No Docker, no reverse proxy, no TLS — none of that helps you iterate faster, so it's not in the dev loop at all.
+**Dev:** `npm run dev` runs Vite (frontend, hot reload) and the Express server (tsx watch) locally on your PC, both pointed at a local SQLite file — no external accounts or credentials needed to develop against, since §7's reversal made the database self-contained. No Docker, no reverse proxy, no TLS — none of that helps you iterate faster, so it's not in the dev loop at all.
 
 **Current state (confirmed):** you have one DuckDNS hostname, `ericb.duckdns.org`, with its dynamic-DNS updater running on the Raspberry Pi, and port `8123` forwarded on your router straight to the Pi for Home Assistant. That setup is unrelated to this project and nothing below touches it.
 
@@ -158,19 +156,36 @@ The Node process itself runs under **PM2** (simpler than a native Windows Servic
 
 ---
 
-## 7. Google Calendar Integration
+## 7. Calendar Data — reversed decision: local SQLite is authoritative, not Google Calendar
 
-Google Calendar stays authoritative — the app never treats its own DB as the source of truth for events. But hitting Google's API on every calendar render would be slow and rate-limit-risky on an old tablet, so the backend keeps a **read-optimized local mirror**:
+**This overturns the original plan.** The brief called for Google Calendar as the source of truth because that was the assumed default for "a calendar app," but M1 shipped a fully custom UI with its own storage before any Google integration existed, and it turned out nobody's missed Google Calendar — there's no other app or person outside these 4 people who needs to see this data, no school/work calendar feed being pulled in, no phone-native-calendar-widget requirement anyone's raised. Once that's true, Google Calendar sync is pure cost with no offsetting benefit: OAuth flows, encrypted token storage, refresh-token rotation, sync-token polling, API quota, an external dependency that can be down when the fridge tablet isn't — all to synchronize with a second system nobody looks at.
 
-- Background job polls Google's Calendar API using **incremental sync tokens** (Google's own cursor mechanism — cheap, only pulls what changed) every few minutes, plus a manual "refresh" trigger.
-- Normalized events land in a local `events` table (see schema below); the frontend always reads from this fast local cache.
-- **Writes are synchronous pass-through**: create/edit/move an event → backend calls the Google Calendar API directly → on success, updates the local cache → responds to the client. No local-only edits, no background write queue, no conflict resolution to design — since devices are basically always on WiFi, "write directly and wait for confirmation" is simpler and more correct than an offline-write model, and nothing in the requirements needs offline writes.
+So: **the app's own SQLite database is the permanent source of truth for events**, not a cache in front of Google. This is a real simplification, not just a deferral:
+- No OAuth, no `google_accounts` table, no token encryption/refresh machinery — none of it gets built.
+- Writes are just local writes — no "call Google, then update the cache" two-step, no partial-failure states to reason about.
+- The `events` table's `google_account_id` / `google_event_id` columns stay in the schema, already nullable — cheap insurance if a real reason to sync with Google ever shows up later (e.g. wanting it to appear in someone's phone's native calendar), but nothing is built toward that until an actual need appears. Section §16 (Assumptions Challenged) has the fuller reasoning.
+- **This makes backups more important, not less** — Google Calendar previously provided free, durable, off-site storage of event data as a side effect of being the source of truth; losing that means the SQLite backup strategy (§13) is now the *only* durability story for real household data, not a nice-to-have. Worth pulling that forward rather than leaving it at M5 — see the M2 roadmap update.
+
+---
+
+## 7a. Recurring Events
+
+Requested directly: "copy Google Calendar's exact repeat flow." Good instinct — it's a well-worn UX pattern (nontechnical users already know it), and the underlying standard (RFC 5545 `RRULE`) is worth using as the storage format even though Google Calendar is no longer synced to, because it's a mature, well-tested way to express "every Thursday," "every weekday," "monthly on the third Thursday," etc. without inventing a bespoke format, and it keeps a future Google export option cheap if it's ever wanted.
+
+- **Storage:** one row in `events` is the "master" event; `recurrence_rule` holds a standard RRULE string (e.g. `FREQ=WEEKLY;BYDAY=TH`). No occurrence rows are materialized in the database.
+- **Expansion:** occurrences are computed at *read time* — when the backend serves `GET /api/events?start=...&end=...`, any row with a `recurrence_rule` gets expanded into however many occurrences fall in the requested range (using the `rrule` npm package, not hand-rolled date math). The frontend never knows or cares whether an event it's rendering is a one-off or a recurrence — it just gets a list of dated event instances back.
+- **UI, mirroring Google's flow:** the add-event sheet's "Repeats" field defaults to "Does not repeat," with quick options ("Daily," "Weekly on [day]," "Monthly on the [nth weekday]," "Annually," "Every weekday (Mon–Fri)") plus a "Custom…" option for interval + specific weekdays + an end condition (never / on a date / after N occurrences) — the same shape as Google Calendar's picker, since there's no reason to redesign a pattern this well-established.
+- **Explicit v1 scope limit:** editing or deleting a recurring event affects **the whole series only** — no "just this one occurrence" support yet (that requires exception/override rows, real added complexity). If "skip just this Thursday" turns out to matter in practice, that's a well-scoped future addition, not a redesign — flagging it now as a conscious limit, not an oversight.
 
 ---
 
 ## 8. To-Do List Storage & Sync
 
 A single flat `todos` table (dateless, as specified), with a `list` column defaulted to `'household'` — cheap forward-compatibility for a future "groceries" vs "chores" split without a migration, but v1 UI only ever shows one list. Mutations are plain REST CRUD; live sync across devices is the SSE-invalidate pattern from §3 — typically sub-second, well within "instant."
+
+**Due dates** are an optional `due_at` on a todo (§11) — deliberately an *attribute*, not a redesign of the list into a second calendar. The list stays flat and always-visible; a due date is just something that can be shown/sorted on, same spirit as `notes`.
+
+**Hide completed** is a pure display filter — a toggle in the to-do panel that hides (not deletes) completed items. This is per-device UI state (localStorage), not synced household data, same reasoning as light/dark mode in §4: it's about how *this screen* wants to look right now, not shared identity. No schema or backend change.
 
 ---
 
@@ -207,12 +222,25 @@ transcript ──▶ local LLM (Ollama) ──▶ JSON tool-call object
 
 ---
 
+## 10a. MCP Server (M3 — explicitly earlier than voice/LLM, see roadmap)
+
+Requested capability: drive the app from Claude Code / any MCP-capable CLI ("add milk to the list" typed at a terminal instead of tapped on a screen). Genuinely useful on its own, and not a scope detour from §10 — **it's the same action layer**, exposed a second way:
+
+- §10's design already requires a validated, whitelisted set of actions (`add_todo`, `complete_todo`, `delete_todo`, `create_event`, `delete_event`, `move_event`, `list_events`, `list_todos`, …) with zod schemas, sitting behind the REST API. Building that as its own internal module (not scattered across Express route handlers) means it has exactly one home.
+- The MCP server is a thin wrapper: each MCP tool definition calls straight into that same action module — no duplicate validation logic, no second implementation to keep in sync.
+- When §10's local-LLM tool-calling layer gets built later, it becomes the *third* caller of that same module (REST API, MCP server, LLM executor). Building the MCP server now doesn't just deliver the CLI capability — it forces the action layer to exist as a clean, reusable module earlier than it otherwise would, which directly de-risks and speeds up M7.
+- **Transport:** stdio, not HTTP/SSE — Claude Code runs on the same Windows PC as the backend, so a local stdio MCP server (registered once via `claude mcp add`) is the simplest correct choice. No auth/networking concerns because it never leaves the machine. Remote MCP access (e.g. from a laptop that isn't this PC) is a real but separate future step (would need HTTP transport + auth) — not needed for "ask Claude Code from the CLI" on this machine.
+
+---
+
 ## 11. Database Schema (v1 + forward-compatible fields for v2)
 
 ```sql
 CREATE TABLE todos (
   id            INTEGER PRIMARY KEY,
   text          TEXT NOT NULL,
+  notes         TEXT,                       -- optional free-text detail, e.g. "leave by 2:30"
+  due_at        TEXT,                       -- optional ISO 8601 date; still a flat dateless-by-default list, this is an optional attribute not a second calendar
   completed     INTEGER NOT NULL DEFAULT 0,
   list          TEXT NOT NULL DEFAULT 'household',
   position      INTEGER NOT NULL,
@@ -220,30 +248,27 @@ CREATE TABLE todos (
   updated_at    TEXT NOT NULL
 );
 
-CREATE TABLE google_accounts (
-  id             INTEGER PRIMARY KEY,
-  label          TEXT NOT NULL,        -- "Eric", "Wife"
-  email          TEXT NOT NULL,
-  access_token   TEXT NOT NULL,        -- encrypted
-  refresh_token  TEXT NOT NULL,        -- encrypted
-  token_expiry   TEXT NOT NULL,
-  calendar_id    TEXT NOT NULL DEFAULT 'primary',
-  sync_token     TEXT,                 -- Google incremental-sync cursor
-  color          TEXT,                 -- per-person color coding in UI
-  created_at     TEXT NOT NULL
+-- A household member. Fixed set of 4 (Eric, Lindsay, Gavin, Damien),
+-- hardcoded via the seed script — no editing UI planned (confirmed).
+CREATE TABLE people (
+  id     INTEGER PRIMARY KEY,
+  label  TEXT NOT NULL,
+  color  TEXT NOT NULL    -- drives the month-grid dot + event accent for this person
 );
 
 CREATE TABLE events (
   id                 INTEGER PRIMARY KEY,
-  google_account_id  INTEGER NOT NULL REFERENCES google_accounts(id),
-  google_event_id    TEXT NOT NULL,
+  person_id          INTEGER REFERENCES people(id),   -- who it's attributed to / colored by
   title              TEXT NOT NULL,
   description        TEXT,
   location           TEXT,
   start_at           TEXT NOT NULL,   -- ISO 8601
   end_at             TEXT NOT NULL,
   all_day            INTEGER NOT NULL DEFAULT 0,
+  recurrence_rule    TEXT,            -- RFC 5545 RRULE string, NULL for non-recurring events; see §7a
   updated_at         TEXT NOT NULL,
+  google_account_id  INTEGER,         -- reserved, unused — see §7's "reversed decision"
+  google_event_id    TEXT,            -- reserved, unused — see §7's "reversed decision"
   UNIQUE(google_account_id, google_event_id)
 );
 
@@ -277,15 +302,17 @@ CREATE TABLE voice_commands (
 ## 12. API Design (v1)
 
 ```
-GET    /api/events?start=YYYY-MM-DD&end=YYYY-MM-DD   list events in range (from local cache)
-POST   /api/events                                    create (writes through to Google)
-PATCH  /api/events/:id                                 edit / move (writes through)
-DELETE /api/events/:id
+GET    /api/events?start=YYYY-MM-DD&end=YYYY-MM-DD    list events in range, recurring events expanded into occurrences (§7a)
+POST   /api/events                                     create (local write — see §7, no Google pass-through)
+PATCH  /api/events/:id                                 edit / move (whole series, if recurring — see §7a scope limit)
+DELETE /api/events/:id                                 delete (whole series, if recurring)
 
 GET    /api/todos
 POST   /api/todos
-PATCH  /api/todos/:id                                  toggle complete / edit text / reorder
+PATCH  /api/todos/:id                                  toggle complete / edit text / notes / due date / reorder
 DELETE /api/todos/:id
+
+GET    /api/people                                     read-only, seed-managed (§11)
 
 GET    /api/settings                                    { skin }
 PATCH  /api/settings                                    update skin (household-wide)
@@ -296,7 +323,7 @@ POST   /api/auth/login                                 { passcode } → sets ses
 GET    /api/health
 ```
 
-v2 adds `POST /api/voice/transcribe` and `POST /api/voice/command`.
+v2 adds `POST /api/voice/transcribe` and `POST /api/voice/command`. The MCP server (§10a) doesn't add HTTP routes — it calls the same underlying action module the REST handlers above call, over stdio instead of HTTP.
 
 ---
 
@@ -304,9 +331,9 @@ v2 adds `POST /api/voice/transcribe` and `POST /api/voice/command`.
 
 **Logging:** structured JSON logs via `pino`, writing to a rotating local file (`pino/pino-roll`) plus console. No centralized log stack — total overkill for two users; if something breaks, you'll be reading the file directly.
 
-**Testing:** pragmatic, not exhaustive. Unit tests (Vitest) for the things that are actually easy to get subtly wrong: the Google sync-token → local-cache mapping, the LLM tool-call zod validator, todo CRUD. Skip heavy e2e infrastructure for v1 while the UI is still changing fast; a handful of Playwright smoke tests (does the month view render, does the PWA install) are worth adding once the UI stabilizes, not before.
+**Testing:** pragmatic, not exhaustive. Unit tests (Vitest) for the things that are actually easy to get subtly wrong: RRULE expansion (§7a), the LLM/MCP tool-call zod validator, todo/event CRUD. Skip heavy e2e infrastructure for v1 while the UI is still changing fast; a handful of Playwright smoke tests (does the month view render, does the PWA install) are worth adding once the UI stabilizes, not before.
 
-**Backups:** the only truly irreplaceable data here is the to-do list and the OAuth tokens — Google already durably stores your calendar events. A small scheduled script does `VACUUM INTO` (SQLite's consistent-snapshot backup mechanism) to copy the DB file into a synced folder (e.g. Google Drive, since you already have the account) daily, keeping ~2 weeks of rotation. No separate backup service needed.
+**Backups:** since §7's reversal, **all real household data lives only in this one SQLite file** — there's no Google-side copy acting as a fallback anymore, which makes this the single most important durability mechanism in the whole system, not a nice-to-have. A manual snapshot (`better-sqlite3`'s `.backup()`, a consistent-copy API) was already taken by hand once real events existed, into `backups/` (gitignored, outside the tracked repo). M2 formalizes this into a small scheduled script — same mechanism, run automatically — copying into a synced folder (e.g. Google Drive, since the account already exists) daily, keeping ~2 weeks of rotation. No separate backup service needed.
 
 ---
 
@@ -314,24 +341,31 @@ v2 adds `POST /api/voice/transcribe` and `POST /api/voice/command`.
 
 Each milestone is independently useful/testable — nothing requires the full architecture to exist before something works.
 
-- **M0 — Skeleton (visible ASAP).** Vite+React scaffold, Express scaffold, one page rendering in a browser. No DB, no auth, no Google. Goal: something on screen in the first session.
-- **M1 — Month calendar UI.** Real month grid, tap-a-day interaction, day-detail view (including its empty state — most days have nothing scheduled), responsive tablet/iPhone layouts, CSS token system with all four skins wired up (chosen via local/hardcoded state for now) — backed by hand-entered events in local SQLite (no Google yet). De-risks all the UI work independent of OAuth complexity.
-- **M2 — Shared to-do list + settings sync.** Full to-do CRUD + SSE live sync, tested across two browser tabs/devices. Same milestone stands up `household_settings` + the Settings → Appearance page, so the skin picked in M1 becomes a real synced household setting instead of hardcoded state.
-- **M3 — Google Calendar integration.** One-time OAuth connect flow, sync-token polling job, local cache table, calendar UI switches from hand-entered events to real ones, writes go through to Google.
+- **M0 — Skeleton. ✅ Done.** Vite+React scaffold, Express scaffold, one page rendering in a browser, wired end-to-end.
+- **M1 — Month calendar UI. ✅ Done.** Real month grid, tap-a-day interaction, day-detail view with empty state, responsive tablet/iPhone layouts, Paper & Ink skin as real CSS tokens, add-event/add-todo flows, per-person color coding (`people` table, 4 hardcoded members) with deduplicated month-grid dots — backed by real local SQLite CRUD (events, todos), no Google (dropped entirely, see §7).
+- **M2 — In progress. Live sync, and the feedback from the first real household usage:**
+  - Extend SSE live-sync (already planned for todos/settings) to **events too** — this is what fixes "I had to manually refresh to see what she added." One mechanism, all three resource types.
+  - **Recurring events** (§7a) — RRULE storage, read-time expansion, Google-style "Repeats…" picker.
+  - **Todo due dates** (`due_at`, §8) and **hide-completed toggle** (client-side filter, §8).
+  - **Delete affordance** — already exists (shipped in M1) for both events and todos; revisit its visibility/discoverability since it apparently wasn't obvious in real use — likely a sizing/placement fix, not new functionality.
+  - **Formalize the backup script** (§13) — an ad-hoc snapshot was already taken by hand once real household data existed; turn that into the real scheduled script now rather than waiting for M5, since §7's reversed decision makes SQLite the only durability story.
+  - Settings → Appearance page (already-planned skin picker, unchanged from earlier scope).
+  - **Process for this milestone specifically:** the UX agent mocks up the new interactive pieces (recurrence picker, hide-completed toggle, due-date entry/display) directly in the real frontend using local/mock state — no schema or backend changes — for approval *before* any of the underlying infra (SSE-for-events, recurrence expansion, due-date persistence) gets built. Delete-affordance and backup-script work aren't UI-facing in the same way and don't need to wait on that approval.
+- **M3 — MCP server** (§10a). Exposes the same action layer as a local stdio MCP tool set for Claude Code / any MCP-capable CLI. Explicitly pulled forward ahead of voice/LLM (below) because it forces that action layer to exist as a clean, reusable module now, which directly speeds up M7 later.
 - **M4 — PWA + tablet kiosk.** Manifest, icons, service worker (app-shell caching), safe-area/notch handling, real "Add to Home Screen" test on your wife's iPhone, Fully Kiosk Browser setup on the tablet.
-- **M5 — Auth + remote access.** Device-session passcode flow, Caddy + DuckDNS port setup, router forwarding, PM2 process management, backup script.
+- **M5 — Auth + remote access.** Device-session passcode flow, Caddy + DuckDNS port setup (networking specifics already confirmed in §6), router forwarding, PM2 process management.
 
 **→ v1 complete here — daily-usable without anything below.**
 
 - **M6 (v2) — Voice input.** Mic button, MediaRecorder capture, Deepgram transcription endpoint.
-- **M7 (v2) — LLM command layer.** Ollama setup, action schema + system prompt, zod validation, confirm-before-execute UI, wired to todo/calendar actions.
-- **M8 (v3+) — extras.** Push notifications (iOS 16.4+ supports Web Push for installed PWAs), weather, meal planning, grocery list, per-person event colors, multiple to-do lists.
+- **M7 (v2) — LLM command layer.** Ollama setup, system prompt, zod validation, confirm-before-execute UI — dispatches into the same action module M3's MCP server already built, not a parallel implementation.
+- **M8 (v3+) — extras.** Push notifications (iOS 16.4+ supports Web Push for installed PWAs), weather, meal planning, grocery list, multiple to-do lists, revisit Google Calendar sync *only* if a concrete need actually shows up (§7).
 
 ---
 
 ## 15. Future Extensibility (why the v1 schema already supports it)
 
-- `google_accounts` supports N accounts from day one — merging your wife's personal calendar later is a config action, not a migration.
+- `events.google_account_id` / `google_event_id` stay in the schema, unused — reviving Google sync later (if a concrete reason ever appears) doesn't require a migration, just building the sync job against columns that already exist.
 - `todos.list` exists now so "Shopping" vs "Chores" splits later without touching existing rows.
 - SSE channel is generic (`events:changed` / `todos:changed`) — a new resource type later (e.g. a future `weather:changed`) reuses the same mechanism.
 - The LLM tool-call whitelist is just more entries in one dispatch table — adding a new voice-controllable action never touches the validation or execution boundary.
@@ -341,7 +375,7 @@ Each milestone is independently useful/testable — nothing requires the full ar
 ## 16. Assumptions Challenged
 
 - **Embedding Google Calendar directly** was in the original ask's "no" column and I'm confirming that's correct — a custom UI is required for the tap-to-day interaction, voice-driven actions, and iPhone-quality UX; an iframe embed can't do any of that well.
-- **Continuous bidirectional sync with conflict resolution** — not needed. Google is authoritative, the local DB is a read cache, writes are synchronous pass-through. This sidesteps a genuinely hard problem (CRDTs/merge logic) that nothing in the requirements actually calls for.
-- **A single shared passcode *or* full Google-login-per-use** — neither alone was right. Split "who authorizes calendar data" (one-time Google OAuth, per account) from "who can use the app day-to-day" (long-lived device-session cookie). Gets frictionless daily use without either a single forever-shared secret as the *only* control, or forcing a Google sign-in every time someone opens the fridge dashboard.
+- **Google Calendar as source of truth at all** — reversed after real usage showed it added cost (OAuth, tokens, sync polling, an external dependency) with no offsetting benefit (nobody outside these 4 people needs to see this data elsewhere). Local SQLite is now the permanent source of truth; see §7 for the full reasoning. This is the biggest architectural change since v1 was first scoped, and it happened because real usage revealed the original assumption was wrong, not because it was a bad guess at the time — Google Calendar was the reasonable default before there was a working custom UI to compare it against.
+- **A single shared passcode *or* full Google-login-per-use** — neither alone was right for daily app access, independent of the Google Calendar decision above. A long-lived device-session cookie gets frictionless daily use without either a single forever-shared secret as the only control, or forcing a sign-in every time someone opens the fridge dashboard.
 - **HTTP Basic Auth at the proxy** — the "simple default" I'd otherwise reach for — actively conflicts with the installed-iPhone-PWA requirement due to how iOS standalone mode handles auth prompts. Ruled out for that reason specifically.
 - **Docker for v1** — deliberately skipped. Dev and prod run on the same physical PC; containerizing buys portability you don't need yet at the cost of a moving part you'd otherwise have to learn/debug. Code is still written in a container-friendly way (env-var config) so this is cheap to add later if you ever move off this PC.
