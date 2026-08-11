@@ -63,6 +63,15 @@ sqlite.exec(`
     recurrence_rule    TEXT,
     updated_at         TEXT NOT NULL
   );
+
+  -- ARCHITECTURE.md §5/§11/§12 (M5/M6) — device-session passcode auth.
+  CREATE TABLE IF NOT EXISTS device_sessions (
+    id            INTEGER PRIMARY KEY,
+    token_hash    TEXT NOT NULL UNIQUE,
+    device_label  TEXT,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL
+  );
 `);
 
 // Dev-time migration shims: if an earlier run of this app created a table

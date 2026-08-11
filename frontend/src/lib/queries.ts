@@ -20,25 +20,32 @@ function logMutationError(context: string) {
   };
 }
 
-export function useEventsQuery(start: string, end: string) {
+// `enabled` (default true) lets App.tsx hold these off until the passcode
+// gate (lib/auth.ts's useAuthGate) confirms a valid session — otherwise
+// every one of these would fire (and 401) on first load, before the initial
+// auth check even resolves.
+export function useEventsQuery(start: string, end: string, enabled = true) {
   return useQuery({
     queryKey: ["events", start, end],
     queryFn: () => api.fetchEvents(start, end),
+    enabled,
   });
 }
 
-export function useTodosQuery() {
+export function useTodosQuery(enabled = true) {
   return useQuery({
     queryKey: ["todos"],
     queryFn: api.fetchTodos,
+    enabled,
   });
 }
 
-export function usePeopleQuery() {
+export function usePeopleQuery(enabled = true) {
   return useQuery({
     queryKey: ["people"],
     queryFn: api.fetchPeople,
     staleTime: 5 * 60_000, // rarely changes — no UI to edit people yet
+    enabled,
   });
 }
 

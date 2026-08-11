@@ -6,8 +6,10 @@ import { TodoList } from "./components/TodoList";
 import { AddEventSheet } from "./components/AddEventSheet";
 import { ExpandedPanelModal } from "./components/ExpandedPanelModal";
 import { NotificationPrompt } from "./components/NotificationPrompt";
+import { PasscodeScreen } from "./components/PasscodeScreen";
 import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth } from "./lib/dateUtils";
 import { friendlyErrorMessage } from "./lib/errors";
+import { useAuthGate } from "./lib/auth";
 import { useImminentEventKeys } from "./lib/imminent";
 import { useLiveSync } from "./lib/useLiveSync";
 import { useAutoCollapse } from "./lib/useAutoCollapse";
@@ -81,6 +83,15 @@ function NavButton({
 }
 
 function App() {
+  // Passcode gate (ARCHITECTURE.md §5/§12, M5/M6) — checked once on mount,
+  // flips back to "unauthenticated" if any later request 401s. Every hook
+  // below still runs unconditionally on every render (rules of hooks); the
+  // "checking"/"unauthenticated" early-returns are at the bottom of this
+  // component, after all hooks are called, and the data-fetching hooks
+  // themselves are held off via `enabled` until authenticated (see below).
+  const { status: authStatus, markAuthenticated } = useAuthGate();
+  const isAuthenticated = authStatus === "authenticated";
+
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [addEventOpen, setAddEventOpen] = useState(false);
@@ -119,7 +130,7 @@ function App() {
   // so any interaction inside it resets the window.
   const bumpExpandedActivity = useAutoCollapse(expandedPanel !== null, () => setExpandedPanel(null));
 
-  useLiveSync();
+  useLiveSync(isAuthenticated);
 
   // M2 UI-only mock (ARCHITECTURE.md §8a): the real trigger is "first time
   // the installed PWA is opened," which needs real install/launch detection
@@ -152,9 +163,9 @@ function App() {
   }
 
   const { start, end } = gridRange(monthAnchor);
-  const eventsQuery = useEventsQuery(start, end);
-  const todosQuery = useTodosQuery();
-  const peopleQuery = usePeopleQuery();
+  const eventsQuery = useEventsQuery(start, end, isAuthenticated);
+  const todosQuery = useTodosQuery(isAuthenticated);
+  const peopleQuery = usePeopleQuery(isAuthenticated);
 
   const createEvent = useCreateEvent();
   const updateEvent = useUpdateEvent();
@@ -272,6 +283,18 @@ function App() {
   // see ExpandTarget above), so this is always the 25% → 50% treatment.
   const expandedModalWidth = "md:w-[50vw]";
   const expandedModalHeight = "md:h-[50vh]";
+
+  // Passcode gate (ARCHITECTURE.md §5/§12) — deliberately after every hook
+  // above so hook call order stays identical across renders. "checking" is
+  // the brief window before the initial GET /api/auth/session resolves; a
+  // plain background avoids flashing the passcode screen for an
+  // already-authenticated returning visit.
+  if (authStatus === "unauthenticated") {
+    return <PasscodeScreen onSuccess={markAuthenticated} />;
+  }
+  if (authStatus === "checking") {
+    return <div className="min-h-full bg-[var(--color-bg)]" />;
+  }
 
   return (
     <div className="skin-grain min-h-full bg-[var(--color-bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] text-[var(--color-ink)] md:flex md:h-svh md:flex-col">

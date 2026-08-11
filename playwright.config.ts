@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_AUTH_PASSCODE, E2E_AUTH_STATE_PATH } from "./e2e/helpers";
 
 // Isolated QA run — never points at the real dev/prod instance (normally
 // :5173 frontend / :3001 backend, possibly holding real household data).
@@ -22,31 +23,25 @@ export default defineConfig({
     baseURL: `http://localhost:${FRONTEND_PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    // Pre-seed the one-time "Enable notifications" prompt (App.tsx,
-    // ARCHITECTURE.md §8a) as already-dismissed for every test. It's a
-    // real fixed-position UI element (md+: a dismissible modal with a
-    // full-screen backdrop, by design — see NotificationPrompt.tsx) that
-    // would otherwise cover the screen on every single test's first-ever
-    // page load (each test gets fresh browser storage), blocking
-    // interaction with everything underneath. No spec in this suite
-    // exercises the prompt itself, so this just keeps ~70 unrelated tests
-    // from having to dismiss it first — matches a real device days after
-    // first launch far better than a perpetually-fresh browser would
-    // anyway.
-    storageState: {
-      cookies: [],
-      origins: [
-        {
-          origin: `http://localhost:${FRONTEND_PORT}`,
-          localStorage: [{ name: "our-calendar:notif-prompt-seen", value: "1" }],
-        },
-      ],
-    },
   },
   projects: [
+    // Logs in once (e2e/auth.setup.ts) against the isolated backend and
+    // writes the resulting session cookie + the notif-prompt-dismissed
+    // localStorage entry to E2E_AUTH_STATE_PATH — see that file. Every
+    // other spec file starts pre-authenticated via the "chromium" project's
+    // `storageState` below, same as this suite already pre-seeded the
+    // notif-prompt dismissal before auth existed (ARCHITECTURE.md §5/§12,
+    // M5/M6 — auth.spec.ts is the one file that deliberately starts
+    // unauthenticated instead, to test the gate itself).
+    {
+      name: "setup",
+      testMatch: /auth\.setup\.ts/,
+    },
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } },
+      testIgnore: /auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 }, storageState: E2E_AUTH_STATE_PATH },
+      dependencies: ["setup"],
     },
   ],
   webServer: [
@@ -54,7 +49,12 @@ export default defineConfig({
       command: "npm run dev:e2e",
       cwd: "./backend",
       url: `http://localhost:${BACKEND_PORT}/api/health`,
-      env: { PORT: String(BACKEND_PORT) },
+      // AUTH_PASSCODE, same pattern as PORT above — set only for this
+      // isolated backend instance, forwarded to the actual `tsx watch`
+      // child process by backend/scripts/reset-and-dev.mjs (which spreads
+      // ...process.env). Never a real .env file for e2e — see
+      // e2e/helpers.ts's E2E_AUTH_PASSCODE comment.
+      env: { PORT: String(BACKEND_PORT), AUTH_PASSCODE: E2E_AUTH_PASSCODE },
       reuseExistingServer: false,
       timeout: 30_000,
       stdout: "pipe",

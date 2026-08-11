@@ -1,6 +1,21 @@
 import type { Page } from "@playwright/test";
 
 /**
+ * AUTH_PASSCODE configured for the isolated e2e backend only (see
+ * playwright.config.ts's webServer env, forwarded to the actual backend
+ * process by backend/scripts/reset-and-dev.mjs the same way DB_DIR_NAME is)
+ * — never the real household passcode, which lives in a real, gitignored
+ * backend/.env this suite never reads. Shared here so playwright.config.ts
+ * (setting it) and auth.setup.ts/auth.spec.ts (using it) can't drift.
+ */
+export const E2E_AUTH_PASSCODE = "e2e-test-passcode-do-not-use-for-real";
+
+/** Where the "setup" project (e2e/auth.setup.ts) writes its logged-in
+ * storageState, and where the "chromium" project reads it back from — see
+ * playwright.config.ts's `projects`. */
+export const E2E_AUTH_STATE_PATH = "e2e/.auth/state.json";
+
+/**
  * The 4 seeded household members and their fixed colors, straight from
  * backend/src/db/seed.ts. If seed.ts ever changes these, update here too —
  * deliberately not derived programmatically so a drift between the two is a

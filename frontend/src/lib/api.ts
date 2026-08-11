@@ -7,18 +7,37 @@ import type {
   UpdateEventInput,
   UpdateTodoInput,
 } from "../types";
+import { notifyUnauthorized } from "./auth";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     ...init,
   });
+  if (res.status === 401) {
+    // ARCHITECTURE.md §5/§12 — a session that's missing/invalid/expired.
+    // Flip the app back to the passcode screen (see lib/auth.ts's
+    // useAuthGate) rather than surfacing this as just another failed
+    // mutation; the caller's own error handling still runs below too.
+    notifyUnauthorized();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error ? JSON.stringify(body.error) : `Request failed: ${res.status}`);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+/** Resolves on a correct passcode (the session cookie is set as a response
+ * header — nothing to read from the body), rejects on a wrong one. */
+export function login(passcode: string): Promise<void> {
+  return request("/api/auth/login", { method: "POST", body: JSON.stringify({ passcode }) });
+}
+
+export function logout(): Promise<void> {
+  return request("/api/auth/logout", { method: "POST" });
 }
 
 export function fetchEvents(startDate: string, endDate: string): Promise<EventRecord[]> {

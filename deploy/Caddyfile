@@ -1,0 +1,36 @@
+# Our Calendar — production Caddyfile (ARCHITECTURE.md §6)
+#
+# Terminates TLS for ericb.duckdns.org on :8443 via DuckDNS's DNS-01 ACME
+# challenge (no port 80 forward needed — DNS-01 proves domain ownership via
+# a TXT record, not an inbound HTTP request). Serves the built frontend
+# directly from disk and reverse-proxies only /api/* (including the SSE
+# stream at /api/stream, which falls under this same prefix) to the Node
+# backend on :3001. Backend never faces the internet directly.
+#
+# Requires the DUCKDNS_API_TOKEN env var to be set wherever this runs (see
+# deploy/ecosystem.config.cjs, which passes it through from PM2's own
+# environment at start time — set it once before the first `pm2 start`,
+# see ARCHITECTURE.md §6's setup checklist for exactly where to get it and
+# how to set it).
+#
+# Requires the custom-built Caddy binary with the caddy-dns/duckdns plugin
+# (the plain winget/caddyserver.com download does NOT include DNS provider
+# plugins by default) — see ARCHITECTURE.md §6 for how this was built.
+
+ericb.duckdns.org:8443 {
+	tls {
+		dns duckdns {env.DUCKDNS_API_TOKEN}
+	}
+
+	handle /api/* {
+		reverse_proxy localhost:3001
+	}
+
+	handle {
+		root * C:/Users/ericm/projects/our-calendar/frontend/dist
+		try_files {path} /index.html
+		file_server
+	}
+
+	encode gzip
+}

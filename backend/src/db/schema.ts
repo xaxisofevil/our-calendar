@@ -57,3 +57,20 @@ export const events = sqliteTable("events", {
   recurrenceRule: text("recurrence_rule"),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * Long-lived device sessions backing the passcode auth gate
+ * (ARCHITECTURE.md §5/§11/§12, M5/M6). One row per device that's completed
+ * the passcode flow; `token_hash` is a hash of the random token handed to
+ * the browser as an HttpOnly cookie — the raw token itself is never stored,
+ * only ever compared by re-hashing an incoming cookie value (see
+ * lib/auth.ts). `device_label` is optional/best-effort, same spirit as
+ * `push_subscriptions.device_label`.
+ */
+export const deviceSessions = sqliteTable("device_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tokenHash: text("token_hash").notNull().unique(),
+  deviceLabel: text("device_label"),
+  createdAt: text("created_at").notNull(),
+  lastSeenAt: text("last_seen_at").notNull(),
+});

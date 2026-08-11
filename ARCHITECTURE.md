@@ -181,6 +181,34 @@ The URL being port-suffixed and inelegant doesn't matter in practice — nobody 
 
 The Node process itself runs under **PM2** (simpler than a native Windows Service for a Node app — `pm2 start`, auto-restart on crash, boot-time startup via `pm2-windows-startup` in a couple of commands).
 
+### Production deployment (M5 — implemented)
+
+**Caddy build note:** the plain `winget`/caddyserver.com download does **not** include DNS provider plugins (needed for the DNS-01 challenge above) — those are opt-in at build time. Caddy's official site exposes a public build API for exactly this (the same mechanism their own download page uses), so no local Go/xcaddy toolchain install was needed:
+```
+curl -sL "https://caddyserver.com/api/download?os=windows&arch=amd64&p=github.com/caddy-dns/duckdns" -o caddy.exe
+```
+This binary (with the `dns.providers.duckdns` module compiled in) lives at `C:\caddy\caddy.exe` — deliberately **outside** the repo, same reasoning as Node.js itself: a system-level tool, not project source. `deploy/Caddyfile` and `deploy/ecosystem.config.cjs` **are** committed to the repo (they only reference env vars, never contain the actual secrets).
+
+**PM2 manages both processes** — the backend AND Caddy — rather than introducing a second service-management tool (e.g. NSSM) just for Caddy. `pm2-windows-startup` gives both boot-time persistence through one mechanism.
+
+**One-time setup checklist** (manual — needs router/account access only you have):
+1. **Router:** forward external port `8443` to this PC's LAN IP, per the plan above. (Port `8123`→Pi for Home Assistant stays untouched.)
+2. **DuckDNS token:** log into duckdns.org, copy the token shown on your account page.
+3. **Set both required env vars** at the User or Machine level (so they persist across reboots/new sessions — e.g. via `[Environment]::SetEnvironmentVariable("DUCKDNS_API_TOKEN", "...", "User")` in an elevated PowerShell, then open a **fresh** shell so it's picked up):
+   - `DUCKDNS_API_TOKEN` — from step 2.
+   - `AUTH_PASSCODE` — choose a real passcode for daily device-session login (§5). Not auto-generated; this is a household decision, not a technical one.
+4. **Build the frontend for production:** `npm run build` in `frontend/` (emits `frontend/dist`, which the Caddyfile serves directly).
+5. **Build the backend:** `npm run build` in `backend/` (emits `backend/dist/index.js`, per its existing `package.json` scripts).
+6. **Start everything:**
+   ```
+   pm2 start deploy/ecosystem.config.cjs
+   pm2 save
+   pm2-startup install
+   ```
+7. Visit `https://ericb.duckdns.org:8443`, enter the passcode once — the resulting device-session cookie (§5) is what makes every visit after that frictionless, on every device.
+
+Validated pre-rollout: `caddy validate --config deploy/Caddyfile` confirms the Caddyfile parses correctly and the DuckDNS DNS module resolves. The stack wasn't started for real during development — doing so would collide with the dev-mode servers already running on the same ports, and shouldn't go live before the router forward + real token/passcode are actually in place.
+
 ---
 
 ## 7. Calendar Data — reversed decision: local SQLite is authoritative, not Google Calendar
