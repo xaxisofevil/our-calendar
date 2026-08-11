@@ -185,6 +185,8 @@ A single flat `todos` table (dateless, as specified), with a `list` column defau
 
 **Due dates** are an optional `due_at` on a todo (§11) — deliberately an *attribute*, not a redesign of the list into a second calendar. The list stays flat and always-visible; a due date is just something that can be shown/sorted on, same spirit as `notes`.
 
+**What happens when a todo passes its due date:** purely visual, deliberately. An incomplete todo with `due_at` in the past is "overdue" — it keeps its already-designed accent-colored pill/label, and **incomplete overdue items float to the top of the list** (most-overdue first), above incomplete items that aren't yet due. Completed items are unaffected by due-date sorting (and hidden entirely if "hide completed" is on). **Nothing else happens automatically** — no auto-deletion, no escalating reminders, no auto-moving to another list. This is a conscious choice: it's a shared household list, not a task-management app, and silently mutating something a family member entered the moment it's late would be a bad surprise, not a helpful one. If overdue-todo push reminders are ever wanted, that's the same mechanism as §8a extended to todos (already noted as a deferred M9 item) — not built now.
+
 **Hide completed** is a pure display filter — a toggle in the to-do panel that hides (not deletes) completed items. This is per-device UI state (localStorage), not synced household data, same reasoning as light/dark mode in §4: it's about how *this screen* wants to look right now, not shared identity. No schema or backend change.
 
 ---
@@ -199,6 +201,17 @@ Requested directly by Lindsay, with an explicit constraint that shapes the whole
 - **Recurring-event dedup:** since §7a computes occurrences at read time rather than storing them as rows, a small `sent_reminders` table (`event_id, occurrence_start_at, sent_at`) tracks which specific occurrence already got a push, so a weekly event doesn't need any special-case logic to avoid re-notifying — the same table naturally prevents duplicates for one-off events too.
 - **Sending mechanism:** a plain `setInterval` inside the already-running backend process (every 1–2 minutes), scanning events (including RRULE-expanded occurrences) starting within the lead-time window, sending via `web-push` to every row in `push_subscriptions`, recording each send in `sent_reminders`. No cron daemon, no job queue, no external scheduler — same "don't add infra that doesn't earn its keep" reasoning as everywhere else in this doc.
 - **Subscriptions are per-device, not hardcoded to Lindsay** — `push_subscriptions` just stores whatever devices opted in. Right now that's practically just her phone, but nothing about the design assumes it's *only* ever her; Eric's phone or the tablet could subscribe later with zero code changes, just by tapping "enable" there too.
+
+---
+
+## 8b. Imminent-Event Highlighting (fridge tablet + day-detail)
+
+A purely visual companion to §8a's push, for the screen that's already glanceable: an event starting soon should be *visibly* about to happen, not just eventually pushed to a phone. Reuses §8a's exact lead-time constant (`NOTIFICATION_LEAD_MINUTES`, default 30) as "imminent" — one concept, two surfaces, not a second magic number to keep in sync.
+
+- **Color, deliberately not literal red:** a slow pulse using the active skin's own accent token (`--color-accent`, fading toward white/background and back), not a hard red alarm color. Red is UI shorthand for "something is wrong"; this is "something's coming up," and a wall-mounted kitchen display that kids also see shouldn't read as alarming for a routine reminder. Each skin gets to define its own pulse tone via its existing tokens — this isn't a hardcoded color, it's a hardcoded *behavior* applied through whichever skin is active (§4).
+- **Scope, deliberately narrow:** only two places pulse — the month-grid dot for that day, and the event's own row in the day-detail panel if that day happens to be selected/visible. Never the whole page, header, or tab — a glance should catch it without the UI feeling like it's shouting continuously.
+- **Mechanism, kept cheap for an older tablet:** a lightweight client-side timer (every 30–60s, not every frame) recomputes which currently-loaded events fall inside the imminent window and toggles a CSS class; the actual pulse is a plain CSS `@keyframes` animation on `background-color`/`opacity`, which the browser compositor handles cheaply on its own — no per-frame JS, no canvas, nothing that would tax weaker hardware even left running for hours. The class is removed automatically once the event's start time passes (an event starting now stops being "upcoming," it's just happening — no lingering pulse for events already underway).
+- **Accessibility:** respects `prefers-reduced-motion` (an existing media-query pattern already in `index.css`) by swapping the animation for a static tinted highlight instead of an ongoing pulse — same information, no motion.
 
 ---
 
@@ -385,7 +398,8 @@ Each milestone is independently useful/testable — nothing requires the full ar
 - **M2 — In progress. Live sync, and the feedback from the first real household usage:**
   - Extend SSE live-sync (already planned for todos/settings) to **events too** — this is what fixes "I had to manually refresh to see what she added." One mechanism, all three resource types.
   - **Recurring events** (§7a) — RRULE storage, read-time expansion, Google-style "Repeats…" picker.
-  - **Todo due dates** (`due_at`, §8) and **hide-completed toggle** (client-side filter, §8).
+  - **Todo due dates** (`due_at`, §8), **overdue sort-to-top** (§8), and **hide-completed toggle** (client-side filter, §8).
+  - **Imminent-event pulse** (§8b) — deliberately sequenced *after* the rest of this batch lands (not dispatched concurrently with it), since it touches the same month-grid/day-detail components other M2 work is actively editing; queued, not yet built.
   - **Delete affordance** — ✅ fixed. Was genuinely broken, not just hard to notice: opacity-0-until-`:hover` is unreachable on a touchscreen entirely. Now an always-visible touch target on both events and todos.
   - **Event editing** — ✅ done. Tap an event row to edit it via the same add-event sheet, pre-filled, wired to the `PATCH /api/events/:id` endpoint that already existed from M1's CRUD build.
   - **Independent QA validator stood up** (`qa-validator`, global agent role — see §13) — found 3 real bugs via a proper isolated Playwright suite (now colocated in-repo, `e2e/`), still open, queued for this milestone:
