@@ -1,6 +1,5 @@
 import { Router } from "express";
-import { db } from "../db/client.js";
-import { people } from "../db/schema.js";
+import { listPeople } from "../actions/index.js";
 
 export const peopleRouter = Router();
 
@@ -8,6 +7,5 @@ export const peopleRouter = Router();
 // managed by the seed script rather than an editing UI. No dynamic
 // people-management planned; if that ever changes, revisit this.
 peopleRouter.get("/", (_req, res) => {
-  const rows = db.select().from(people).all();
-  res.json(rows);
+  res.json(listPeople());
 });
