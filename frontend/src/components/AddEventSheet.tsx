@@ -147,7 +147,11 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, error,
         aria-modal="true"
         aria-labelledby={titleId}
         className={cx(
-          "max-h-[88vh] w-full max-w-full overflow-y-auto rounded-t-[20px] bg-[var(--color-surface)] p-5 pb-6 shadow-2xl transition-transform duration-200 ease-out md:max-w-[380px] md:rounded-[var(--radius-panel)] md:p-6",
+          // Mobile: bottom sheet touching the physical bottom edge (viewport-fit=cover,
+          // index.html), so pb accounts for the iPhone home-indicator safe area on top
+          // of the existing 1.5rem — md:p-6 below overrides this back to a plain fixed
+          // value for the md+ centered dialog, which isn't edge-to-edge and doesn't need it.
+          "max-h-[88vh] w-full max-w-full overflow-y-auto rounded-t-[20px] bg-[var(--color-surface)] p-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-2xl transition-transform duration-200 ease-out md:max-w-[380px] md:rounded-[var(--radius-panel)] md:p-6",
           open ? "translate-y-0 md:scale-100 md:opacity-100" : "translate-y-full md:translate-y-0 md:scale-95 md:opacity-0",
         )}
       >

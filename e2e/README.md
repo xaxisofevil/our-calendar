@@ -2,15 +2,19 @@
 
 Playwright coverage for M0 (skeleton), M1 (month calendar, day-detail,
 add-event/add-todo, per-person color coding, Paper & Ink skin, responsive
-tablet/iPhone layouts), and M2 (SSE live-sync for events/todos, recurring
+tablet/iPhone layouts), M2 (SSE live-sync for events/todos, recurring
 events wired to real RRULE persistence + read-time expansion, todo due
 dates + overdue sort-to-top wired to a real `due_at` column, the three
-validation/error-surfacing bug fixes, delete-affordance and event-editing).
-The hide-completed-todos toggle and notification opt-in are still UI-only
-per ARCHITECTURE.md's M2 scope (no backend persistence for either is
-planned/needed — hide-completed is deliberately per-device localStorage,
-and the notification prompt is a pre-permission explainer only, real Web
-Push wiring is M5).
+validation/error-surfacing bug fixes, delete-affordance and event-editing),
+and M4 (`pwa.spec.ts` — manifest.json served with the right installability
+fields/icons, service worker registration, app-shell-only caching with no
+`/api/` entries ever landing in `CacheStorage`, and the "can't reach
+server" state when `/api/*` is unreachable — see ARCHITECTURE.md §4's "PWA
+implementation" subsection for the full design). The hide-completed-todos
+toggle and notification opt-in are still UI-only per ARCHITECTURE.md's M2
+scope (no backend persistence for either is planned/needed — hide-completed
+is deliberately per-device localStorage, and the notification prompt is a
+pre-permission explainer only, real Web Push wiring is M5).
 
 ## Running
 

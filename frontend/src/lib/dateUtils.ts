@@ -53,6 +53,17 @@ export function gridRange(monthAnchor: Date): { start: string; end: string } {
   return { start: dateKey(days[0]), end: dateKey(days[days.length - 1]) };
 }
 
+/** The 7 days (Sun-Sat) of the week containing `selectedDate` — mobile
+ * week-strip's row of day chips. Always covered by the currently-loaded
+ * month's 42-cell grid range (see gridRange/getMonthGridDays above) as long
+ * as callers keep `monthAnchor` in sync with `selectedDate` (App.tsx's
+ * handleSelectDate does this), so no separate fetch is ever needed just for
+ * the strip. */
+export function getWeekStripDays(selectedDate: Date): Date[] {
+  const weekStart = startOfWeek(selectedDate);
+  return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+}
+
 /** Which occurrence of its weekday `date` is within its month (1-5) — the
  * "third" in "monthly on the third Thursday". */
 export function nthWeekdayOfMonth(date: Date): number {

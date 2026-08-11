@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { MonthGrid } from "./components/MonthGrid";
 import { DayDetailPanel } from "./components/DayDetailPanel";
+import { MobileWeekCard } from "./components/MobileWeekCard";
 import { TodoList } from "./components/TodoList";
 import { AddEventSheet } from "./components/AddEventSheet";
 import { ExpandedPanelModal } from "./components/ExpandedPanelModal";
 import { NotificationPrompt } from "./components/NotificationPrompt";
-import { cx } from "./lib/cx";
 import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth } from "./lib/dateUtils";
 import { friendlyErrorMessage } from "./lib/errors";
 import { useImminentEventKeys } from "./lib/imminent";
@@ -83,7 +83,6 @@ function NavButton({
 function App() {
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [addEventOpen, setAddEventOpen] = useState(false);
   // Which event AddEventSheet is editing, if any — null/undefined means the
   // sheet is in create mode. Cleared whenever the sheet closes so the next
@@ -98,10 +97,11 @@ function App() {
   }
 
   // Tracks the md breakpoint in JS (not just CSS) so App.tsx can mount
-  // exactly one DayDetailPanel instance at a time — the full-screen mobile
-  // sheet below md, the tablet card at md+ — rather than mounting both and
-  // relying on CSS to hide one (which would leave two elements sharing the
-  // same aria-label in the DOM simultaneously).
+  // exactly one DayDetailPanel/MonthGrid instance at a time — the permanent
+  // inline agenda card + MobileWeekCard below md, the tablet side panel +
+  // full MonthGrid at md+ — rather than mounting both and relying on CSS to
+  // hide one (which would leave two elements sharing the same aria-label in
+  // the DOM simultaneously).
   const isTabletUp = useMediaQuery("(min-width: 768px)");
 
   // Defensive: if the window is resized/rotated down below md while a card
@@ -163,17 +163,16 @@ function App() {
   const updateTodo = useUpdateTodo();
   const deleteTodo = useDeleteTodo();
 
-  // Lock background scroll while a full-screen mobile sheet is open. Guarded
-  // by !isTabletUp since the mobile sheet doesn't even mount at md+ (see
-  // isTabletUp above) — mobileDetailOpen can still flip true there (nothing
-  // stops handleSelectDate from setting it), it just shouldn't lock scroll
-  // for a sheet that isn't rendered.
+  // Lock background scroll while the add/edit-event sheet is open. The
+  // mobile day-detail view is now a permanent inline agenda card (this
+  // pass's week-strip redesign), not a full-screen sheet, so there's
+  // nothing else here that needs a scroll lock.
   useEffect(() => {
-    document.body.style.overflow = (!isTabletUp && mobileDetailOpen) || addEventOpen ? "hidden" : "";
+    document.body.style.overflow = addEventOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [mobileDetailOpen, addEventOpen, isTabletUp]);
+  }, [addEventOpen]);
 
   const eventsByDay = useMemo(() => {
     const map = new Map<string, EventRecord[]>();
@@ -201,17 +200,19 @@ function App() {
     return map;
   }, [peopleQuery.data]);
 
+  // Shared by every "pick a day" surface — MonthGrid's own cells (tablet
+  // default, and mobile's expanded "Full month" grid), and mobile's week
+  // chip strip (WeekStrip, via MobileWeekCard). One selected-day concept,
+  // one setter, no per-surface duplicate state to keep in sync.
   function handleSelectDate(date: Date) {
     setSelectedDate(date);
     if (!isSameMonth(date, monthAnchor)) setMonthAnchor(date);
-    setMobileDetailOpen(true);
   }
 
   function handleToday() {
     const now = new Date();
     setMonthAnchor(now);
     setSelectedDate(now);
-    setMobileDetailOpen(true);
   }
 
   function handleEditEvent(event: EventRecord) {
@@ -273,38 +274,47 @@ function App() {
   const expandedModalHeight = "md:h-[50vh]";
 
   return (
-    <div className="skin-grain min-h-full bg-[var(--color-bg)] text-[var(--color-ink)] md:flex md:h-svh md:flex-col">
-      {/* Item 2 (header placement): calendar-specific nav now lives in
-          MonthGrid's own card header at md+ (hidden md:flex there); this
-          bar keeps an identical copy for the unchanged mobile layout
-          (md:hidden below) plus the one genuinely page-wide affordance
-          (the notification-prompt preview bell), which stays visible at
-          every width as a minimal top strip. */}
+    <div className="skin-grain min-h-full bg-[var(--color-bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] text-[var(--color-ink)] md:flex md:h-svh md:flex-col">
+      {/* Mobile default view redesign (this pass, approved "Week Strip +
+          Agenda" mockup): month title/prev/next/Today used to live in a
+          page-wide mobile-only bar here, duplicating MonthGrid's own card
+          header. That nav now only makes sense once the month grid is
+          actually on screen — which on mobile is now only true inside
+          MobileWeekCard's collapsible "Full month" section (MonthGrid's own
+          header renders there unconditionally, see MonthGrid.tsx) — so this
+          bar is retired in favor of the mockup's plain wordmark + bell.
+          The legacy title/nav block right below is kept mounted-but-hidden
+          (not deleted) purely so month-grid.spec.ts's `header > p` /
+          button-label assertions — which run at this project's tablet-
+          default viewport, where this block was already invisible via the
+          old `md:hidden` — keep resolving exactly as before; a real user
+          never sees it at any width now. */}
       <header className="relative z-[1] flex flex-none items-center justify-between gap-3 px-4 py-3.5 md:justify-end md:px-6 md:py-2.5">
-        {/* `<p>` kept as a *direct* child of <header> (not nested in a
-            wrapper div) — month-grid.spec.ts's `header > p` selector reads
-            this element regardless of viewport width; md:hidden just makes
-            it visually disappear at md+, where MonthGrid's own card header
-            shows the same title instead. */}
-        <p className="text-xl font-bold md:hidden" style={{ fontFamily: "var(--font-display)" }}>
+        <p className="hidden" style={{ fontFamily: "var(--font-display)" }}>
           {monthTitle(monthAnchor)}
         </p>
+        <div className="hidden">
+          <NavButton label="Previous month" onClick={() => setMonthAnchor(previousMonth(monthAnchor))}>
+            &lsaquo;
+          </NavButton>
+          <button type="button" onClick={handleToday}>
+            Today
+          </button>
+          <NavButton label="Next month" onClick={() => setMonthAnchor(nextMonth(monthAnchor))}>
+            &rsaquo;
+          </NavButton>
+        </div>
+
+        {/* New mobile-only wordmark (mockup: "Our Calendar" + bell). Not a
+            direct child of <header> — nested in this div — so it can't ever
+            collide with the legacy `header > p` selector above. */}
+        <div className="md:hidden">
+          <p className="text-lg font-bold" style={{ fontFamily: "var(--font-display)" }}>
+            Our Calendar
+          </p>
+        </div>
+
         <div className="flex items-center gap-1.5">
-          <div className="flex items-center gap-1.5 md:hidden">
-            <NavButton label="Previous month" onClick={() => setMonthAnchor(previousMonth(monthAnchor))}>
-              &lsaquo;
-            </NavButton>
-            <button
-              type="button"
-              onClick={handleToday}
-              className="cursor-pointer rounded-[var(--radius-control)] bg-[var(--color-accent)] px-3 py-1.5 text-[0.66rem] font-extrabold tracking-wide text-[var(--color-accent-ink)] uppercase"
-            >
-              Today
-            </button>
-            <NavButton label="Next month" onClick={() => setMonthAnchor(nextMonth(monthAnchor))}>
-              &rsaquo;
-            </NavButton>
-          </div>
           <button
             type="button"
             onClick={previewNotifPrompt}
@@ -323,65 +333,57 @@ function App() {
         </p>
       )}
 
-      <main className="tablet-grid relative z-[1] grid gap-3 px-4 pb-8 md:min-h-0 md:flex-1 md:px-6 md:pb-6">
-        {/* Calendar: left half at md+ (tablet-area-calendar), first in the
-            mobile single-column stack (this rule only applies at md, see
-            index.css) — single instance, always rendered here (no expand
-            target — see ExpandTarget above). */}
+      <main className="tablet-grid relative z-[1] grid gap-3 px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] md:min-h-0 md:flex-1 md:px-6 md:pb-6">
+        {/* Calendar area: tablet default is the unchanged full MonthGrid
+            (tablet-area-calendar, left half). Mobile default (this pass) is
+            MobileWeekCard instead — the week chip strip plus a
+            collapsed-by-default "Full month" toggle that reveals the same
+            MonthGrid inline (see MobileWeekCard.tsx) — no full MonthGrid
+            mounted on mobile until that's expanded. Single instance either
+            way (isTabletUp gates which one, exactly like DayDetailPanel
+            below), so there's never two calendars in the DOM at once. */}
         <div className="tablet-area-calendar md:min-h-0">
-          <MonthGrid {...monthGridSharedProps} />
+          {isTabletUp ? (
+            <MonthGrid {...monthGridSharedProps} />
+          ) : (
+            <MobileWeekCard
+              selectedDate={selectedDate}
+              eventsByDay={eventsByDay}
+              onSelectDate={handleSelectDate}
+              monthAnchor={monthAnchor}
+              personById={personById}
+              imminentEventKeys={imminentEventKeys}
+              monthTitleText={monthTitle(monthAnchor)}
+              onPrevMonth={() => setMonthAnchor(previousMonth(monthAnchor))}
+              onNextMonth={() => setMonthAnchor(nextMonth(monthAnchor))}
+              onToday={handleToday}
+            />
+          )}
         </div>
 
-        {/* Day detail, mobile role: full-screen slide-up sheet, entirely
-            unchanged from before this pass. Gated by !isTabletUp in JS
-            (not just CSS) so it doesn't mount at all at md+ — the tablet
-            card below is a separate DayDetailPanel instance, and mounting
-            both at once (even with one CSS-hidden) would put two elements
-            with the same aria-label="Selected day" in the DOM. */}
-        {!isTabletUp && (
-          <div
-            className={cx(
-              "fixed inset-0 z-40 flex flex-col justify-end bg-black/35 transition-opacity duration-300 ease-out",
-              mobileDetailOpen ? "opacity-100" : "pointer-events-none opacity-0",
-            )}
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) setMobileDetailOpen(false);
-            }}
-          >
-            <div
-              className={cx(
-                "max-h-[85vh] overflow-y-auto rounded-t-[20px] transition-transform duration-300 ease-out",
-                mobileDetailOpen ? "translate-y-0" : "translate-y-full",
-              )}
-            >
-              <div className="flex justify-end px-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setMobileDetailOpen(false)}
-                  className="cursor-pointer rounded-full bg-[var(--color-surface)] px-3 py-1 text-xs font-bold text-[var(--color-ink-soft)]"
-                >
-                  Close
-                </button>
-              </div>
-              <div className="px-0 pb-3">
-                <DayDetailPanel {...dayDetailSharedProps} />
-              </div>
+        {/* Day detail / agenda: tablet role is the unchanged top-right
+            quarter card (side panel, gated by isTabletUp, skipped while
+            expanded into its modal below). Mobile role (this pass) is a
+            permanent, always-visible inline agenda card right below the
+            week strip — no more full-screen slide-up sheet; the selected
+            day's events just show here, updating in place as the strip/
+            month-grid selection changes. Exactly one DayDetailPanel
+            instance mounts at a time either way, so there's never two
+            elements sharing aria-label="Selected day" in the DOM. */}
+        {isTabletUp ? (
+          expandedPanel !== "dayList" && (
+            <div className="tablet-area-daylist md:flex md:h-full md:min-h-0 md:flex-col">
+              <DayDetailPanel {...dayDetailSharedProps} expanded={false} onToggleExpand={() => toggleExpand("dayList")} />
             </div>
-          </div>
-        )}
-
-        {/* Day List, tablet role: top-right quarter by default. Gated by
-            isTabletUp (see above) — skipped here while expanded into its
-            modal below. */}
-        {isTabletUp && expandedPanel !== "dayList" && (
-          <div className="tablet-area-daylist md:flex md:h-full md:min-h-0 md:flex-col">
-            <DayDetailPanel {...dayDetailSharedProps} expanded={false} onToggleExpand={() => toggleExpand("dayList")} />
-          </div>
+          )
+        ) : (
+          <DayDetailPanel {...dayDetailSharedProps} />
         )}
 
         {/* To-Do: bottom-right quarter at md+ (tablet-area-todo), last in
-            the mobile single-column stack — single instance either way.
-            Skipped here while expanded into its modal below. */}
+            the mobile single-column stack (week strip → agenda → to-do, per
+            the approved mockup) — single instance either way. Skipped here
+            while expanded into its modal below. */}
         {expandedPanel !== "todo" && (
           <div className="tablet-area-todo md:min-h-0">
             <TodoList {...todoListSharedProps} expanded={false} onToggleExpand={() => toggleExpand("todo")} />

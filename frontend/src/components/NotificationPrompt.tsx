@@ -81,7 +81,11 @@ export function NotificationPrompt({ open, onDismiss }: NotificationPromptProps)
           // Deliberately below the day-detail sheet (z-40) and add-event
           // overlay (z-50): opening either should visually supersede this
           // lightweight nudge, not fight it for taps.
-          "fixed inset-x-4 bottom-4 z-30 transition-all duration-300 ease-out md:hidden",
+          //
+          // bottom offset adds the iPhone home-indicator safe area (viewport-fit=cover,
+          // index.html) on top of the existing 1rem, so the card floats clear of it
+          // rather than sitting right against/under it. env() resolves to 0 elsewhere.
+          "fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-30 transition-all duration-300 ease-out md:hidden",
           open ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
         )}
       >

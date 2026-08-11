@@ -3,8 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Our Calendar</title>
+    <meta name="description" content="Family calendar and to-do dashboard." />
+
+    <!-- ARCHITECTURE.md §4 "PWA" / M4: vite-plugin-pwa auto-injects the
+         <link rel="manifest"> and service-worker registration script at
+         build time. The tags below aren't things it injects on its own —
+         theme_color for browsers that read it straight off <head> before
+         the manifest is parsed, and the iOS-specific tags, since iOS
+         Safari's "Add to Home Screen" still leans on these rather than
+         fully deriving everything from manifest.json. -->
+    <meta name="theme-color" content="#b0512e" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Our Calendar" />
+    <meta name="mobile-web-app-capable" content="yes" />
   </head>
   <body>
     <div id="root"></div>

@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# vite-plugin-pwa's dev-mode service worker output (devOptions.enabled,
+# see vite.config.ts) — generated on every `vite dev`/`vite build`, same
+# spirit as dist/ above, not something to lint or commit.
+dev-dist
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

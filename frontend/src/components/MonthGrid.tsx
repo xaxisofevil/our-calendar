@@ -17,19 +17,29 @@ interface MonthGridProps {
   // don't care about the feature (e.g. a future storybook/test render)
   // aren't forced to pass an empty Set.
   imminentEventKeys?: Set<string>;
-  // Tablet card header (this pass): the Calendar card now owns its own
-  // month title + prev/next/Today, living directly above its grid instead
-  // of in a page-wide header bar — see App.tsx's global <header>, which
-  // keeps an identical (mobile-only) copy of these same controls for the
-  // unchanged mobile layout. hidden md:flex below. No expand button here
-  // (deliberately, per direct feedback) — Calendar already defaults to
-  // half the screen, so an expand-to-modal affordance would gain nothing
-  // the way it does for Day List/To-Do going 25% → 50%; it's simply
-  // always the fixed left-half card.
+  // Calendar card header: month title + prev/next/Today live directly above
+  // the grid (not a page-wide header bar — see App.tsx's global <header>,
+  // whose old mobile-only copy of these controls is now retired/hidden in
+  // favor of the week-strip mobile redesign). Unconditionally visible
+  // whenever MonthGrid renders — see the `embedded`-prop comment above and
+  // the header `<div>` below. No expand button here (deliberately, per
+  // direct feedback) — on tablet, Calendar already defaults to half the
+  // screen, so an expand-to-modal affordance would gain nothing the way it
+  // does for Day List/To-Do going 25% → 50%; it's simply always the fixed
+  // left-half card there.
   monthTitleText: string;
   onPrevMonth: () => void;
   onNextMonth: () => void;
   onToday: () => void;
+  // Mobile week-strip's "Full month" expand section (this pass): renders
+  // the identical grid/header, just without MonthGrid's own card chrome
+  // (background/shadow/padding) so it sits flush on its parent card's
+  // surface instead of nesting a visually-redundant second card inside the
+  // first — matches the approved mockup's flat treatment. Purely a
+  // container-styling switch; the grid/cell/header logic below is
+  // completely unchanged either way. Defaults to false (tablet's own
+  // boxed-card usage, unchanged).
+  embedded?: boolean;
 }
 
 function NavButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
@@ -116,15 +126,28 @@ export function MonthGrid({
   onPrevMonth,
   onNextMonth,
   onToday,
+  embedded = false,
 }: MonthGridProps) {
   const days = getMonthGridDays(monthAnchor);
 
   return (
     <section
       aria-label="Month"
-      className="rounded-[var(--radius-panel)] bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)] md:flex md:h-full md:flex-col"
+      className={cx(
+        "rounded-[var(--radius-panel)] md:flex md:h-full md:flex-col",
+        embedded
+          ? "bg-transparent p-0 shadow-none"
+          : "bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)]",
+      )}
     >
-      <div className="mb-3 hidden flex-none items-center justify-between gap-2 md:flex">
+      {/* Month title + prev/next/Today: was `hidden md:flex` (tablet-only —
+          mobile used to get an identical copy of these controls in
+          App.tsx's page-wide header instead). Now unconditionally visible
+          whenever MonthGrid itself renders, since mobile's "Full month"
+          expand section (MobileWeekCard.tsx) mounts this same component and
+          needs its own nav — MonthGrid no longer mounts at all on mobile
+          while collapsed, so this doesn't add new always-on chrome there. */}
+      <div className="mb-3 flex flex-none items-center justify-between gap-2">
         <p
           className="font-bold"
           style={{ fontFamily: "var(--font-display)", fontSize: "var(--card-title-size)" }}

@@ -1,5 +1,5 @@
-import { test, expect } from "@playwright/test";
-import { addDaysFromToday, dayCell } from "./helpers";
+import { test, expect, type Locator, type Page } from "@playwright/test";
+import { addDaysFromToday, dayCell, dayDetailLabel, dayGridLabel } from "./helpers";
 
 // ARCHITECTURE.md §4: "Tablet (large landscape screen): month grid +
 // day-detail as a side panel, both visible at once." / "iPhone (narrow):
@@ -92,42 +92,145 @@ test.describe("Responsive layout: tablet (~1280x800)", () => {
   });
 });
 
+// Mobile default view (this pass — approved "Week Strip + Agenda" mockup
+// direction, ARCHITECTURE.md M2 UX pass): replaces the old "full month grid
+// on load, tap a day to push a full-screen sheet" behavior with a 7-day
+// chip strip + a permanent inline agenda card below it, and the full month
+// grid moved behind a collapsed-by-default "Full month" toggle. See
+// frontend/src/components/{WeekStrip,MobileWeekCard}.tsx.
+//
+// Day-offset convention (README.md): offset 0 is reserved for this spec and
+// never mutated. Everything below either reads offset 0/3/9 (seeded/never-
+// written fixtures, per README.md) or navigates/reads without creating any
+// event, so nothing here needs its own reserved offset.
 test.describe("Responsive layout: iPhone (~390x844)", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("day-detail is hidden on load and appears as a full-screen sheet after tapping a day", async ({
+  /** A button locator matching a day's aria-label prefix (shared by
+   * WeekStrip's chips and MonthGrid's cells — same `EEEE, MMMM d` format),
+   * scoped to `within` so a date visible in both the strip and an expanded
+   * grid at once never resolves ambiguously. */
+  function dayButton(within: Page | Locator, date: Date) {
+    return within.getByRole("button", { name: new RegExp(`^${dayGridLabel(date).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) });
+  }
+
+  /** A day within the same Sun-Sat week as today, guaranteed to already be
+   * one of the 7 chips the strip renders by default (it only ever shows
+   * *today's* week) — unlike a fixed offset, which could land in a
+   * different week depending on what day of the week "today" actually is. */
+  function sameWeekOtherDay(): Date {
+    const today = addDaysFromToday(0);
+    const delta = today.getDay() === 6 ? -1 : 1; // Saturday has no "+1" in-week day
+    const d = new Date(today);
+    d.setDate(d.getDate() + delta);
+    return d;
+  }
+
+  test("default view: week strip + permanent agenda are visible, today selected, full month collapsed", async ({
     page,
   }) => {
     await page.goto("/");
-    const wrapper = page.locator("div.z-40");
 
-    await expect(wrapper).toHaveCSS("position", "fixed");
-    await expect(wrapper).toHaveCSS("opacity", "0");
-    await expect(wrapper).toHaveCSS("pointer-events", "none");
+    const strip = page.locator('section[aria-label="This week"]');
+    await expect(strip).toBeVisible();
 
-    await dayCell(page, addDaysFromToday(0)).click();
+    const today = addDaysFromToday(0);
+    const todayChip = dayButton(strip, today);
+    await expect(todayChip).toHaveAttribute("aria-current", "date");
+    await expect(todayChip).toHaveAttribute("aria-pressed", "true");
 
-    await expect(wrapper).toHaveCSS("opacity", "1");
-    await expect(wrapper).not.toHaveCSS("pointer-events", "none");
-    await expect(page.locator('section[aria-label="Selected day"]')).toBeVisible();
-    await expect(page.locator("div.z-40").getByRole("button", { name: "Close" })).toBeVisible();
+    // Agenda is a permanent card, not a hidden/fixed-position sheet — no
+    // full-screen overlay wrapper exists at all on this view anymore.
+    await expect(page.locator("div.z-40")).toHaveCount(0);
+    const agenda = page.locator('section[aria-label="Selected day"]');
+    await expect(agenda).toBeVisible();
+    await expect(agenda).toContainText(dayDetailLabel(today));
+
+    // Full month starts collapsed — MonthGrid isn't even mounted yet.
+    await expect(page.locator('section[aria-label="Month"]')).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Full month" })).toBeVisible();
+
+    // To-do list stays visible in the new flow too.
+    await expect(page.locator('section[aria-label="Household to-do list"]')).toBeVisible();
   });
 
-  test("the Close button dismisses the sheet again", async ({ page }) => {
+  test("tapping a different chip updates the agenda in place, no navigation/sheet", async ({ page }) => {
     await page.goto("/");
-    await dayCell(page, addDaysFromToday(0)).click();
-    const wrapper = page.locator("div.z-40");
-    await expect(wrapper).toHaveCSS("opacity", "1");
+    const strip = page.locator('section[aria-label="This week"]');
+    const other = sameWeekOtherDay();
+    const otherChip = dayButton(strip, other);
 
-    await page.locator("div.z-40").getByRole("button", { name: "Close" }).click();
-    await expect(wrapper).toHaveCSS("opacity", "0");
+    await otherChip.click();
+
+    await expect(otherChip).toHaveAttribute("aria-pressed", "true");
+    const agenda = page.locator('section[aria-label="Selected day"]');
+    await expect(agenda).toContainText(dayDetailLabel(other));
+    await expect(page.locator("div.z-40")).toHaveCount(0);
   });
 
-  test("the month grid remains full-width and usable behind the closed sheet", async ({ page }) => {
+  test("Full month expands the real month grid inline, with its own nav", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator('section[aria-label="Month"]')).toBeVisible();
-    const box = await page.locator('section[aria-label="Month"]').boundingBox();
-    expect(box?.width).toBeGreaterThan(300); // comfortably fills a 390px-wide viewport
+    const toggle = page.getByRole("button", { name: "Full month" });
+    await toggle.click();
+
+    const grid = page.locator('section[aria-label="Month"]');
+    await expect(grid).toBeVisible();
+    await expect(page.getByRole("button", { name: "Hide full month" })).toBeVisible();
+    // MonthGrid's own header (title + prev/next/Today) now renders here too
+    // (mobile no longer has a page-wide duplicate — see App.tsx).
+    await expect(grid.getByRole("button", { name: "Next month" })).toBeVisible();
+    await expect(grid.getByRole("button", { name: "Today" })).toBeVisible();
+
+    // And it collapses again on a second tap, without picking a day.
+    await page.getByRole("button", { name: "Hide full month" }).click();
+    await expect(grid).toHaveCount(0);
+  });
+
+  test("picking a day inside the expanded month grid updates the strip/agenda and collapses the grid back", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Full month" }).click();
+
+    // Day 9: seeded/never-written fixture (README.md) — also exercises a
+    // pick that (for most "today"s) falls outside the currently-displayed
+    // week, proving the grid pick isn't limited to the strip's own week.
+    const target = addDaysFromToday(9);
+    const grid = page.locator('section[aria-label="Month"]');
+    await dayButton(grid, target).click();
+
+    // Grid collapses back down automatically after the pick (matches the
+    // approved mockup's interaction).
+    await expect(page.locator('section[aria-label="Month"]')).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Full month" })).toBeVisible();
+
+    // Strip and agenda both now reflect the newly-picked day.
+    const strip = page.locator('section[aria-label="This week"]');
+    await expect(dayButton(strip, target)).toHaveAttribute("aria-pressed", "true");
+    const agenda = page.locator('section[aria-label="Selected day"]');
+    await expect(agenda).toContainText(dayDetailLabel(target));
+  });
+
+  test("the agenda reuses the real Day List: seeded event, empty state, and add-event all work", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Full month" }).click();
+    const grid = page.locator('section[aria-label="Month"]');
+    const agenda = page.locator('section[aria-label="Selected day"]');
+
+    // backend/src/db/seed.ts's "Dentist" event, 3 days out (same fixture
+    // day-detail.spec.ts's tablet coverage reads).
+    await dayButton(grid, addDaysFromToday(3)).click();
+    await expect(agenda.getByText("Dentist")).toBeVisible();
+
+    // Grid auto-collapsed after that pick — re-expand for the next one.
+    await page.getByRole("button", { name: "Full month" }).click();
+    await dayButton(grid, addDaysFromToday(9)).click();
+    await expect(agenda.getByText("Nothing scheduled.")).toBeVisible();
+
+    await agenda.getByRole("button", { name: "Add event for the selected day" }).click();
+    await expect(page.getByRole("dialog", { name: "New event" })).toBeVisible();
   });
 
   test("no tablet expand buttons render at this width", async ({ page }) => {
