@@ -386,7 +386,13 @@ Each milestone is independently useful/testable — nothing requires the full ar
   - Extend SSE live-sync (already planned for todos/settings) to **events too** — this is what fixes "I had to manually refresh to see what she added." One mechanism, all three resource types.
   - **Recurring events** (§7a) — RRULE storage, read-time expansion, Google-style "Repeats…" picker.
   - **Todo due dates** (`due_at`, §8) and **hide-completed toggle** (client-side filter, §8).
-  - **Delete affordance** — already exists (shipped in M1) for both events and todos; revisit its visibility/discoverability since it apparently wasn't obvious in real use — likely a sizing/placement fix, not new functionality.
+  - **Delete affordance** — ✅ fixed. Was genuinely broken, not just hard to notice: opacity-0-until-`:hover` is unreachable on a touchscreen entirely. Now an always-visible touch target on both events and todos.
+  - **Event editing** — ✅ done. Tap an event row to edit it via the same add-event sheet, pre-filled, wired to the `PATCH /api/events/:id` endpoint that already existed from M1's CRUD build.
+  - **Independent QA validator stood up** (`qa-validator`, global agent role — see §13) — found 3 real bugs via a proper isolated Playwright suite (now colocated in-repo, `e2e/`), still open, queued for this milestone:
+    1. A blank event title isn't rejected — silently saved as "Untitled event" instead.
+    2. An event title over the backend's 200-char limit is correctly rejected server-side, but the failure is silent — no error shown, the event just never appears.
+    3. Same silent-failure pattern for todo text over the 500-char limit.
+    (General fix direction: `AddEventSheet`/todo quick-add need real client-side validation before submit, and the mutation hooks in `queries.ts` need `onError` handling that actually surfaces something to the user, instead of the sheet closing/input clearing unconditionally regardless of success.)
   - **Formalize the backup script** (§13) — an ad-hoc snapshot was already taken by hand once real household data existed; turn that into the real scheduled script now rather than waiting for M5, since §7's reversed decision makes SQLite the only durability story.
   - Settings → Appearance page (already-planned skin picker, unchanged from earlier scope).
   - **Process for this milestone specifically:** the UX agent mocks up the new interactive pieces (recurrence picker, hide-completed toggle, due-date entry/display) directly in the real frontend using local/mock state — no schema or backend changes — for approval *before* any of the underlying infra (SSE-for-events, recurrence expansion, due-date persistence) gets built. Delete-affordance and backup-script work aren't UI-facing in the same way and don't need to wait on that approval.
