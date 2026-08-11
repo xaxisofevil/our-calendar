@@ -37,6 +37,16 @@ export interface CreateEventInput {
   personId?: number | null;
 }
 
+export interface UpdateEventInput {
+  title?: string;
+  description?: string | null;
+  location?: string | null;
+  startAt?: string;
+  endAt?: string;
+  allDay?: boolean;
+  personId?: number | null;
+}
+
 export interface CreateTodoInput {
   text: string;
   notes?: string | null;

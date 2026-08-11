@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./api";
-import type { CreateEventInput, CreateTodoInput, UpdateTodoInput } from "../types";
+import type { CreateEventInput, CreateTodoInput, UpdateEventInput, UpdateTodoInput } from "../types";
 
 // No SSE yet (that's explicitly M2 scope per ARCHITECTURE.md — the
 // household-shared to-do list + settings sync milestone). For now every
@@ -34,6 +34,16 @@ export function useCreateEvent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateEventInput) => api.createEvent(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+    },
+  });
+}
+
+export function useUpdateEvent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: UpdateEventInput }) => api.updateEvent(id, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
     },

@@ -8,10 +8,18 @@ interface DayDetailPanelProps {
   events: EventRecord[];
   personById: Map<number, PersonRecord>;
   onAddEvent: () => void;
+  onEditEvent: (event: EventRecord) => void;
   onDeleteEvent: (id: number) => void;
 }
 
-export function DayDetailPanel({ selectedDate, events, personById, onAddEvent, onDeleteEvent }: DayDetailPanelProps) {
+export function DayDetailPanel({
+  selectedDate,
+  events,
+  personById,
+  onAddEvent,
+  onEditEvent,
+  onDeleteEvent,
+}: DayDetailPanelProps) {
   const hasEvents = events.length > 0;
 
   return (
@@ -46,7 +54,17 @@ export function DayDetailPanel({ selectedDate, events, personById, onAddEvent, o
             return (
               <li
                 key={event.id}
-                className="rounded-lg bg-[var(--color-bg)] px-3 py-2.5"
+                role="button"
+                tabIndex={0}
+                aria-label={`Edit ${event.title}`}
+                onClick={() => onEditEvent(event)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onEditEvent(event);
+                  }
+                }}
+                className="cursor-pointer rounded-lg bg-[var(--color-bg)] px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
                 style={{ borderRadius: "4px 12px 12px 4px", borderLeft: `3px dashed ${accentColor}` }}
               >
                 <div className="flex items-center gap-2">
@@ -67,7 +85,13 @@ export function DayDetailPanel({ selectedDate, events, personById, onAddEvent, o
                   <span className="ml-auto text-xs font-bold text-[var(--color-ink-soft)] tabular-nums">
                     {event.allDay ? "All day" : format(new Date(event.startAt), "h:mm a")}
                   </span>
-                  <DeleteButton label={`Delete ${event.title}`} onClick={() => onDeleteEvent(event.id)} />
+                  {/* Kept a fully separate tap target from the row's own
+                      edit-on-tap behavior above (stopPropagation on both
+                      mouse and keyboard) — the two must never trigger each
+                      other, per ARCHITECTURE.md's delete-affordance note. */}
+                  <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="flex-none">
+                    <DeleteButton label={`Delete ${event.title}`} onClick={() => onDeleteEvent(event.id)} />
+                  </div>
                 </div>
                 {(event.location || event.description) && (
                   <p className="mt-1 pl-4 text-xs leading-relaxed text-[var(--color-ink-soft)]">

@@ -14,6 +14,7 @@ import {
   useEventsQuery,
   usePeopleQuery,
   useTodosQuery,
+  useUpdateEvent,
   useUpdateTodo,
 } from "./lib/queries";
 import type { EventRecord, PersonRecord } from "./types";
@@ -61,6 +62,10 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [addEventOpen, setAddEventOpen] = useState(false);
+  // Which event AddEventSheet is editing, if any — null/undefined means the
+  // sheet is in create mode. Cleared whenever the sheet closes so the next
+  // "+" tap always starts fresh.
+  const [editingEvent, setEditingEvent] = useState<EventRecord | null>(null);
   // M2 UI-only mock (ARCHITECTURE.md §8 / §14): `todos.due_at` isn't a real
   // column yet and no route accepts it — this just keeps the due date the
   // quick-add form collected, keyed by the real todo id once it comes back
@@ -104,6 +109,7 @@ function App() {
   const peopleQuery = usePeopleQuery();
 
   const createEvent = useCreateEvent();
+  const updateEvent = useUpdateEvent();
   const deleteEvent = useDeleteEvent();
   const createTodo = useCreateTodo();
   const updateTodo = useUpdateTodo();
@@ -232,7 +238,14 @@ function App() {
                 selectedDate={selectedDate}
                 events={selectedDayEvents}
                 personById={personById}
-                onAddEvent={() => setAddEventOpen(true)}
+                onAddEvent={() => {
+                  setEditingEvent(null);
+                  setAddEventOpen(true);
+                }}
+                onEditEvent={(event) => {
+                  setEditingEvent(event);
+                  setAddEventOpen(true);
+                }}
                 onDeleteEvent={(id) => deleteEvent.mutate(id)}
               />
             </div>
@@ -273,10 +286,19 @@ function App() {
         open={addEventOpen}
         selectedDate={selectedDate}
         people={peopleQuery.data ?? []}
-        onClose={() => setAddEventOpen(false)}
-        onSave={(input) => {
-          createEvent.mutate(input);
+        editingEvent={editingEvent}
+        onClose={() => {
           setAddEventOpen(false);
+          setEditingEvent(null);
+        }}
+        onSave={(input, editingId) => {
+          if (editingId != null) {
+            updateEvent.mutate({ id: editingId, input });
+          } else {
+            createEvent.mutate(input);
+          }
+          setAddEventOpen(false);
+          setEditingEvent(null);
         }}
       />
     </div>

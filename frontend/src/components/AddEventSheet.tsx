@@ -1,16 +1,25 @@
 import { useEffect, useId, useState } from "react";
+import { format } from "date-fns";
 import { cx } from "../lib/cx";
 import { dayDetailLabel } from "../lib/dateUtils";
 import { defaultRepeatValue, type RepeatValue } from "../lib/recurrence";
 import { RepeatField } from "./RepeatField";
-import type { CreateEventInput, PersonRecord } from "../types";
+import type { CreateEventInput, EventRecord, PersonRecord } from "../types";
 
 interface AddEventSheetProps {
   open: boolean;
   selectedDate: Date;
   people: PersonRecord[];
+  /** When set, the sheet opens in edit mode for this event instead of
+   * create mode — same component, aware of which mode it's in (see
+   * ARCHITECTURE.md M2 delete-affordance follow-up: editing was the other
+   * half of that gap). Null/undefined means "creating a new event". */
+  editingEvent?: EventRecord | null;
   onClose: () => void;
-  onSave: (input: CreateEventInput) => void;
+  /** Called on save with the built payload. `editingId` is the id being
+   * edited (edit mode) or undefined (create mode) — one callback, one
+   * component, App.tsx routes it to the right mutation. */
+  onSave: (input: CreateEventInput, editingId?: number) => void;
 }
 
 function combineDateAndTime(date: Date, timeStr: string): Date {
@@ -26,8 +35,13 @@ function startOfDay(date: Date): Date {
   return d;
 }
 
-export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: AddEventSheetProps) {
+export function AddEventSheet({ open, selectedDate, people, editingEvent, onClose, onSave }: AddEventSheetProps) {
   const titleId = useId();
+  const isEditing = editingEvent != null;
+  // The date the sheet operates on: the editing event's own date when
+  // editing (so a stale `selectedDate` in the parent can never silently
+  // move the event), otherwise whichever day was tapped to add to.
+  const effectiveDate = editingEvent ? new Date(editingEvent.startAt) : selectedDate;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [allDay, setAllDay] = useState(false);
@@ -35,14 +49,25 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
   const [endTime, setEndTime] = useState("16:00");
   const [personId, setPersonId] = useState<number | null>(null);
   // M2 UI-only mock (ARCHITECTURE.md §7a / §14) — visually complete, not
-  // persisted. Nothing here is sent in the onSave payload below.
+  // persisted. Nothing here is sent in the onSave payload below, in either
+  // create or edit mode.
   const [repeat, setRepeat] = useState<RepeatValue>(() => defaultRepeatValue(selectedDate));
 
-  // Reset to a clean slate every time the sheet opens, per the validated
-  // mockup's behavior (each add starts fresh rather than remembering the
-  // last draft). Person defaults to the first seeded person, not "no one".
+  // Reset every time the sheet opens: to the event's current values when
+  // editing, or to a clean slate when creating (per the validated mockup's
+  // behavior — each add starts fresh rather than remembering the last
+  // draft). Person defaults to the first seeded person, not "no one".
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    if (editingEvent) {
+      setTitle(editingEvent.title);
+      setDescription(editingEvent.description ?? "");
+      setAllDay(editingEvent.allDay);
+      setStartTime(format(new Date(editingEvent.startAt), "HH:mm"));
+      setEndTime(format(new Date(editingEvent.endAt), "HH:mm"));
+      setPersonId(editingEvent.personId);
+      setRepeat(defaultRepeatValue(new Date(editingEvent.startAt)));
+    } else {
       setTitle("");
       setDescription("");
       setAllDay(false);
@@ -52,7 +77,7 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
       setRepeat(defaultRepeatValue(selectedDate));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, editingEvent]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,22 +93,25 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
     let startAt: Date;
     let endAt: Date;
     if (allDay) {
-      startAt = startOfDay(selectedDate);
+      startAt = startOfDay(effectiveDate);
       endAt = new Date(startAt);
       endAt.setDate(endAt.getDate() + 1);
     } else {
-      startAt = combineDateAndTime(selectedDate, startTime);
-      endAt = combineDateAndTime(selectedDate, endTime);
+      startAt = combineDateAndTime(effectiveDate, startTime);
+      endAt = combineDateAndTime(effectiveDate, endTime);
       if (endAt <= startAt) endAt = new Date(startAt.getTime() + 60 * 60_000);
     }
-    onSave({
-      title: trimmedTitle,
-      description: description.trim() ? description.trim() : null,
-      startAt: startAt.toISOString(),
-      endAt: endAt.toISOString(),
-      allDay,
-      personId,
-    });
+    onSave(
+      {
+        title: trimmedTitle,
+        description: description.trim() ? description.trim() : null,
+        startAt: startAt.toISOString(),
+        endAt: endAt.toISOString(),
+        allDay,
+        personId,
+      },
+      editingEvent?.id,
+    );
   }
 
   return (
@@ -110,7 +138,7 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
 
         <div className="mb-4 flex items-center justify-between">
           <p id={titleId} className="text-base font-bold" style={{ fontFamily: "var(--font-display)" }}>
-            New event
+            {isEditing ? "Edit event" : "New event"}
           </p>
           <button
             type="button"
@@ -140,7 +168,7 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
             Date
           </span>
           <div className="w-full rounded-[var(--radius-control)] border border-[var(--color-line)] bg-[var(--color-bg)] px-2.5 py-2 text-sm text-[var(--color-ink-soft)]">
-            {dayDetailLabel(selectedDate)}
+            {dayDetailLabel(effectiveDate)}
           </div>
         </div>
 
@@ -219,7 +247,7 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
         {/* Repeats: mirrors Google Calendar's picker per ARCHITECTURE.md
             §7a. UI-only for this pass — see the `repeat` state comment
             above; nothing here is persisted yet. */}
-        <RepeatField anchor={selectedDate} value={repeat} onChange={setRepeat} />
+        <RepeatField anchor={effectiveDate} value={repeat} onChange={setRepeat} />
 
         {/* Notes: plain, visually secondary field below the main fields —
             optional, so it never adds friction to "just add a title and go." */}
@@ -247,7 +275,7 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
             onClick={handleSave}
             className="cursor-pointer rounded-full bg-[var(--color-accent)] px-4.5 py-2 text-sm font-bold text-[var(--color-accent-ink)]"
           >
-            Save
+            {isEditing ? "Save changes" : "Save"}
           </button>
         </div>
       </div>

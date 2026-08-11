@@ -4,6 +4,7 @@ import type {
   EventRecord,
   PersonRecord,
   TodoRecord,
+  UpdateEventInput,
   UpdateTodoInput,
 } from "../types";
 
@@ -30,6 +31,10 @@ export function fetchPeople(): Promise<PersonRecord[]> {
 
 export function createEvent(input: CreateEventInput): Promise<EventRecord> {
   return request("/api/events", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateEvent(id: number, input: UpdateEventInput): Promise<EventRecord> {
+  return request(`/api/events/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function deleteEvent(id: number): Promise<void> {
