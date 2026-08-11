@@ -10,3 +10,8 @@ dist/
 
 # Agent worktrees are throwaway scratch checkouts, not part of history
 .claude/worktrees/
+
+# Playwright (e2e/, see playwright.config.ts)
+/playwright-report/
+/test-results/
+/blob-report/
