@@ -1,6 +1,8 @@
 import { useEffect, useId, useState } from "react";
 import { cx } from "../lib/cx";
 import { dayDetailLabel } from "../lib/dateUtils";
+import { defaultRepeatValue, type RepeatValue } from "../lib/recurrence";
+import { RepeatField } from "./RepeatField";
 import type { CreateEventInput, PersonRecord } from "../types";
 
 interface AddEventSheetProps {
@@ -32,6 +34,9 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
   const [startTime, setStartTime] = useState("15:00");
   const [endTime, setEndTime] = useState("16:00");
   const [personId, setPersonId] = useState<number | null>(null);
+  // M2 UI-only mock (ARCHITECTURE.md §7a / §14) — visually complete, not
+  // persisted. Nothing here is sent in the onSave payload below.
+  const [repeat, setRepeat] = useState<RepeatValue>(() => defaultRepeatValue(selectedDate));
 
   // Reset to a clean slate every time the sheet opens, per the validated
   // mockup's behavior (each add starts fresh rather than remembering the
@@ -44,6 +49,7 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
       setStartTime("15:00");
       setEndTime("16:00");
       setPersonId(people[0]?.id ?? null);
+      setRepeat(defaultRepeatValue(selectedDate));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -209,6 +215,11 @@ export function AddEventSheet({ open, selectedDate, people, onClose, onSave }: A
             </label>
           </div>
         )}
+
+        {/* Repeats: mirrors Google Calendar's picker per ARCHITECTURE.md
+            §7a. UI-only for this pass — see the `repeat` state comment
+            above; nothing here is persisted yet. */}
+        <RepeatField anchor={selectedDate} value={repeat} onChange={setRepeat} />
 
         {/* Notes: plain, visually secondary field below the main fields —
             optional, so it never adds friction to "just add a title and go." */}

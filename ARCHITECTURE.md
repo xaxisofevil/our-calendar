@@ -17,7 +17,7 @@ The smallest thing your wife will actually use every day, with nothing else buil
 - Installable iPhone PWA — tap icon, use, leave
 - Lightweight auth + remote access, no VPN, no second app
 
-Deliberately **out of v1**: voice, LLM, push notifications, weather, meal planning, grocery lists. The schema and API are shaped so these bolt on later without a rewrite, but nothing in v1 depends on them.
+Deliberately **out of v1**: voice, LLM, weather, meal planning, grocery lists. The schema and API are shaped so these bolt on later without a rewrite, but nothing in v1 depends on them. (Push notifications were originally on this list too — pulled into v1 as M5 after direct request; see §8a for why a single fixed reminder rule doesn't count as the "advanced notifications" this exclusion originally meant.)
 
 Home Assistant is **not part of this application at all**. It happens to run in the same house, but there's no product reason for the dashboard to talk to it, so it's dropped from this architecture entirely rather than deferred to a later version. HA keeps its own existing DuckDNS exposure and port forward, completely untouched by anything below.
 
@@ -189,6 +189,19 @@ A single flat `todos` table (dateless, as specified), with a `list` column defau
 
 ---
 
+## 8a. Push Notifications — pulled into v1 scope
+
+Requested directly by Lindsay, with an explicit constraint that shapes the whole design: notify about everything (any person's events, not just her own), and don't make her configure anything — one lead time, one message format, no per-event or per-person settings. The original roadmap had deferred "advanced notifications" to v3+; this isn't that — a single fixed reminder rule is about as minimal as notifications get, so it's brought forward rather than treated as the deferred "advanced" version.
+
+- **Mechanism: standard Web Push**, not a native app and not a vendor SDK. iOS 16.4+ supports Web Push for PWAs installed to the home screen — this is *why* it has to come after M4, not before: it needs the service worker and installed-PWA context M4 sets up. The `web-push` npm package (VAPID) handles delivery from the backend; no Firebase account, no Apple Developer Program membership, no new external service to run.
+- **Subscription = the entire configuration surface.** Opening the installed PWA the first time surfaces a single lightweight "Enable notifications" prompt (in-app explainer button before the native OS permission dialog, since that native dialog can only be asked cleanly once — better to ask for real intent first). Accepting registers the device's push subscription with the backend. That's the whole setup; there is no notifications settings page.
+- **Trigger rule, fixed in code, not configurable:** any event — any person — starting within `NOTIFICATION_LEAD_MINUTES` (defaulting to 30) fires one push. Message format is a fixed template: `"{title} — {time} ({person})"`. Todos are explicitly out of scope for this pass (due-date reminders are a natural future extension of the exact same mechanism, not built now since it wasn't asked for).
+- **Recurring-event dedup:** since §7a computes occurrences at read time rather than storing them as rows, a small `sent_reminders` table (`event_id, occurrence_start_at, sent_at`) tracks which specific occurrence already got a push, so a weekly event doesn't need any special-case logic to avoid re-notifying — the same table naturally prevents duplicates for one-off events too.
+- **Sending mechanism:** a plain `setInterval` inside the already-running backend process (every 1–2 minutes), scanning events (including RRULE-expanded occurrences) starting within the lead-time window, sending via `web-push` to every row in `push_subscriptions`, recording each send in `sent_reminders`. No cron daemon, no job queue, no external scheduler — same "don't add infra that doesn't earn its keep" reasoning as everywhere else in this doc.
+- **Subscriptions are per-device, not hardcoded to Lindsay** — `push_subscriptions` just stores whatever devices opted in. Right now that's practically just her phone, but nothing about the design assumes it's *only* ever her; Eric's phone or the tablet could subscribe later with zero code changes, just by tapping "enable" there too.
+
+---
+
 ## 9. Voice — Deepgram Integration (v2, not v1)
 
 Push-to-talk button → browser `MediaRecorder` captures a short clip → uploaded as one blob to the backend on release → backend calls **Deepgram's pre-recorded transcription REST endpoint** (not the streaming/WebSocket API — simpler, and for short commands the latency difference is imperceptible; streaming is a v3 optimization if it's ever needed) → transcript returned to the client and handed to the LLM layer below.
@@ -287,6 +300,25 @@ CREATE TABLE household_settings (
   updated_at    TEXT NOT NULL
 );
 
+-- §8a: one row per opted-in device, not scoped to a particular person
+CREATE TABLE push_subscriptions (
+  id            INTEGER PRIMARY KEY,
+  endpoint      TEXT NOT NULL UNIQUE,
+  p256dh        TEXT NOT NULL,   -- Web Push subscription key material
+  auth          TEXT NOT NULL,
+  device_label  TEXT,            -- "Lindsay's iPhone", best-effort/optional
+  created_at    TEXT NOT NULL
+);
+
+-- §8a: dedup log so a recurring event's Nth occurrence only ever notifies
+-- once, without needing occurrences to exist as real rows anywhere
+CREATE TABLE sent_reminders (
+  event_id           INTEGER NOT NULL REFERENCES events(id),
+  occurrence_start_at TEXT NOT NULL,   -- ISO 8601; same value for non-recurring events
+  sent_at            TEXT NOT NULL,
+  PRIMARY KEY (event_id, occurrence_start_at)
+);
+
 -- v2
 CREATE TABLE voice_commands (
   id             INTEGER PRIMARY KEY,
@@ -316,6 +348,9 @@ GET    /api/people                                     read-only, seed-managed (
 
 GET    /api/settings                                    { skin }
 PATCH  /api/settings                                    update skin (household-wide)
+
+POST   /api/push/subscribe                              register a device's Web Push subscription (§8a)
+DELETE /api/push/subscribe                               unsubscribe (e.g. device uninstalls the PWA)
 
 GET    /api/stream                                     SSE — "todos:changed" / "events:changed" / "settings:changed"
 
@@ -353,13 +388,14 @@ Each milestone is independently useful/testable — nothing requires the full ar
   - **Process for this milestone specifically:** the UX agent mocks up the new interactive pieces (recurrence picker, hide-completed toggle, due-date entry/display) directly in the real frontend using local/mock state — no schema or backend changes — for approval *before* any of the underlying infra (SSE-for-events, recurrence expansion, due-date persistence) gets built. Delete-affordance and backup-script work aren't UI-facing in the same way and don't need to wait on that approval.
 - **M3 — MCP server** (§10a). Exposes the same action layer as a local stdio MCP tool set for Claude Code / any MCP-capable CLI. Explicitly pulled forward ahead of voice/LLM (below) because it forces that action layer to exist as a clean, reusable module now, which directly speeds up M7 later.
 - **M4 — PWA + tablet kiosk.** Manifest, icons, service worker (app-shell caching), safe-area/notch handling, real "Add to Home Screen" test on your wife's iPhone, Fully Kiosk Browser setup on the tablet.
-- **M5 — Auth + remote access.** Device-session passcode flow, Caddy + DuckDNS port setup (networking specifics already confirmed in §6), router forwarding, PM2 process management.
+- **M5 — Push notifications** (§8a). Requested directly by Lindsay; placed here specifically because it has a hard dependency on M4's service worker/installed-PWA context — can't be built before it. VAPID setup, `push_subscriptions` + `sent_reminders` tables, the in-process reminder-scan interval, service worker `push`/`notificationclick` handlers, and the one-time in-app "Enable notifications" prompt (mocked for approval before the backend send-logic is built, same process as M2). Fixed 30-minute lead time and fixed message template, deliberately not configurable — see §8a for why.
+- **M6 — Auth + remote access.** Device-session passcode flow, Caddy + DuckDNS port setup (networking specifics already confirmed in §6), router forwarding, PM2 process management. (Not a hard dependency for M5's push delivery itself — subscriptions send independent of remote reachability — but this is what makes subscribing/using the app reliable while away from home, so the two naturally land around the same time.)
 
 **→ v1 complete here — daily-usable without anything below.**
 
-- **M6 (v2) — Voice input.** Mic button, MediaRecorder capture, Deepgram transcription endpoint.
-- **M7 (v2) — LLM command layer.** Ollama setup, system prompt, zod validation, confirm-before-execute UI — dispatches into the same action module M3's MCP server already built, not a parallel implementation.
-- **M8 (v3+) — extras.** Push notifications (iOS 16.4+ supports Web Push for installed PWAs), weather, meal planning, grocery list, multiple to-do lists, revisit Google Calendar sync *only* if a concrete need actually shows up (§7).
+- **M7 (v2) — Voice input.** Mic button, MediaRecorder capture, Deepgram transcription endpoint.
+- **M8 (v2) — LLM command layer.** Ollama setup, system prompt, zod validation, confirm-before-execute UI — dispatches into the same action module M3's MCP server already built, not a parallel implementation.
+- **M9 (v3+) — extras.** Weather, meal planning, grocery list, multiple to-do lists, todo due-date reminders (same mechanism as §8a, extended to todos), revisit Google Calendar sync *only* if a concrete need actually shows up (§7).
 
 ---
 

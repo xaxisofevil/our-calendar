@@ -52,3 +52,22 @@ export function gridRange(monthAnchor: Date): { start: string; end: string } {
   const days = getMonthGridDays(monthAnchor);
   return { start: dateKey(days[0]), end: dateKey(days[days.length - 1]) };
 }
+
+/** Which occurrence of its weekday `date` is within its month (1-5) — the
+ * "third" in "monthly on the third Thursday". */
+export function nthWeekdayOfMonth(date: Date): number {
+  return Math.ceil(date.getDate() / 7);
+}
+
+/** True if `date` is the last time its weekday occurs in its month —
+ * Google Calendar's picker says "last" instead of e.g. "fifth" there. */
+export function isLastWeekdayOfMonth(date: Date): boolean {
+  return addDays(date, 7).getMonth() !== date.getMonth();
+}
+
+const ORDINALS = ["first", "second", "third", "fourth", "fifth"];
+
+export function ordinalWeekdayLabel(date: Date): string {
+  if (isLastWeekdayOfMonth(date)) return "last";
+  return ORDINALS[nthWeekdayOfMonth(date) - 1] ?? "last";
+}

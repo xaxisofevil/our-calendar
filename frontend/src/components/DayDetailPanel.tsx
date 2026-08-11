@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 import type { EventRecord, PersonRecord } from "../types";
 import { dayDetailLabel } from "../lib/dateUtils";
+import { DeleteButton } from "./DeleteButton";
 
 interface DayDetailPanelProps {
   selectedDate: Date;
@@ -45,7 +46,7 @@ export function DayDetailPanel({ selectedDate, events, personById, onAddEvent, o
             return (
               <li
                 key={event.id}
-                className="group rounded-lg bg-[var(--color-bg)] px-3 py-2.5"
+                className="rounded-lg bg-[var(--color-bg)] px-3 py-2.5"
                 style={{ borderRadius: "4px 12px 12px 4px", borderLeft: `3px dashed ${accentColor}` }}
               >
                 <div className="flex items-center gap-2">
@@ -66,14 +67,7 @@ export function DayDetailPanel({ selectedDate, events, personById, onAddEvent, o
                   <span className="ml-auto text-xs font-bold text-[var(--color-ink-soft)] tabular-nums">
                     {event.allDay ? "All day" : format(new Date(event.startAt), "h:mm a")}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteEvent(event.id)}
-                    aria-label={`Delete ${event.title}`}
-                    className="ml-1 flex-none cursor-pointer rounded text-[var(--color-ink-faint)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    &times;
-                  </button>
+                  <DeleteButton label={`Delete ${event.title}`} onClick={() => onDeleteEvent(event.id)} />
                 </div>
                 {(event.location || event.description) && (
                   <p className="mt-1 pl-4 text-xs leading-relaxed text-[var(--color-ink-soft)]">
