@@ -3,6 +3,7 @@ import { seed } from "./db/seed.js";
 import { eventsRouter } from "./routes/events.js";
 import { peopleRouter } from "./routes/people.js";
 import { todosRouter } from "./routes/todos.js";
+import { streamRouter } from "./routes/stream.js";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
@@ -12,6 +13,11 @@ app.use(express.json());
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "our-calendar-backend" });
 });
+
+// SSE live-sync channel (ARCHITECTURE.md §3/§12) — mounted ahead of the
+// CRUD routers only for readability; the path is distinct so order doesn't
+// actually matter here.
+app.use("/api/stream", streamRouter);
 
 app.use("/api/events", eventsRouter);
 app.use("/api/todos", todosRouter);

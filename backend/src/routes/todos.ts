@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, sqlite } from "../db/client.js";
 import { todos } from "../db/schema.js";
 import { createTodoSchema, updateTodoSchema } from "../lib/validation.js";
+import { broadcast } from "../lib/sse.js";
 
 export const todosRouter = Router();
 
@@ -13,6 +14,7 @@ function serializeTodo(row: TodoRow) {
     id: row.id,
     text: row.text,
     notes: row.notes,
+    dueAt: row.dueAt,
     completed: Boolean(row.completed),
     list: row.list,
     position: row.position,
@@ -39,6 +41,7 @@ todosRouter.post("/", (req, res) => {
     .values({
       text: parsed.data.text,
       notes: parsed.data.notes ?? null,
+      dueAt: parsed.data.dueAt ?? null,
       list: parsed.data.list ?? "household",
       completed: false,
       position: nextPosition,
@@ -52,6 +55,7 @@ todosRouter.post("/", (req, res) => {
     .from(todos)
     .where(eq(todos.id, Number(result.lastInsertRowid)))
     .get();
+  broadcast("todos:changed");
   res.status(201).json(serializeTodo(row!));
 });
 
@@ -73,6 +77,7 @@ todosRouter.patch("/:id", (req, res) => {
     .where(eq(todos.id, id))
     .run();
   const row = db.select().from(todos).where(eq(todos.id, id)).get();
+  broadcast("todos:changed");
   res.json(serializeTodo(row!));
 });
 
@@ -84,5 +89,6 @@ todosRouter.delete("/:id", (req, res) => {
     return;
   }
   db.delete(todos).where(eq(todos.id, id)).run();
+  broadcast("todos:changed");
   res.status(204).end();
 });

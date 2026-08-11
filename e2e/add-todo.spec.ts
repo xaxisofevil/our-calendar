@@ -37,6 +37,12 @@ test.describe("Add-todo flow", () => {
 
   test("blank text is not added as an empty item", async ({ page }) => {
     const list = page.locator('section[aria-label="Household to-do list"]');
+    // Wait for the initial todos fetch to land before counting — "Milk" is
+    // one of seed.ts's fixed rows and is never deleted by any spec in this
+    // suite, so it's a reliable "list has actually loaded" signal. Without
+    // this, `count()` (unlike `expect(...)`, it doesn't retry) can catch
+    // the list mid-fetch, when it's still empty.
+    await todoRow(page, "Milk").waitFor();
     const before = await list.getByRole("checkbox").count();
 
     const input = page.getByLabel("Add a to-do item");

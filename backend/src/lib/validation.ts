@@ -1,4 +1,32 @@
 import { z } from "zod";
+import rrulePkg from "rrule";
+
+const { RRule } = rrulePkg;
+
+// Bare RFC 5545 RRULE text, no "DTSTART" / "RRULE:" prefix — the event's own
+// startAt column is the DTSTART (see ARCHITECTURE.md §7a). Validated by
+// actually parsing it with the `rrule` package rather than a hand-rolled
+// regex, so anything the expansion code in lib/recurrence.ts couldn't
+// handle is rejected up front instead of silently producing zero occurrences.
+const recurrenceRuleField = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .nullable()
+  .optional()
+  .refine(
+    (value) => {
+      if (value == null) return true;
+      try {
+        RRule.fromString(`RRULE:${value}`);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "Invalid recurrence rule" },
+  );
 
 export const createEventSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -8,15 +36,25 @@ export const createEventSchema = z.object({
   endAt: z.string().min(1),
   allDay: z.boolean().optional().default(false),
   personId: z.number().int().nullable().optional(),
+  recurrenceRule: recurrenceRuleField,
 });
 export type CreateEventInput = z.infer<typeof createEventSchema>;
 
 export const updateEventSchema = createEventSchema.partial();
 export type UpdateEventInput = z.infer<typeof updateEventSchema>;
 
+// Optional ISO 8601 date (YYYY-MM-DD) — see ARCHITECTURE.md §8/§11.
+const dueAtField = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD")
+  .nullable()
+  .optional();
+
 export const createTodoSchema = z.object({
   text: z.string().trim().min(1).max(500),
   notes: z.string().trim().max(2000).nullable().optional(),
+  dueAt: dueAtField,
   list: z.string().trim().min(1).max(50).optional().default("household"),
 });
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
@@ -24,6 +62,7 @@ export type CreateTodoInput = z.infer<typeof createTodoSchema>;
 export const updateTodoSchema = z.object({
   text: z.string().trim().min(1).max(500).optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  dueAt: dueAtField,
   completed: z.boolean().optional(),
   position: z.number().int().optional(),
   list: z.string().trim().min(1).max(50).optional(),

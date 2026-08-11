@@ -1,12 +1,16 @@
 # Our Calendar — E2E suite (QA validator)
 
-Independent Playwright coverage for M0 (skeleton) + M1 (month calendar,
-day-detail, add-event/add-todo, per-person color coding, Paper & Ink skin,
-responsive tablet/iPhone layouts). Explicitly **excludes** the M2-in-progress
-partial code visible in this tree (recurring events / "Repeats" picker,
-hide-completed-todos toggle, todo due dates, the delete-button visual fix,
-notification opt-in) — that work is mid-implementation elsewhere and not yet
-stable; see the top-level QA report for details, not this file.
+Playwright coverage for M0 (skeleton), M1 (month calendar, day-detail,
+add-event/add-todo, per-person color coding, Paper & Ink skin, responsive
+tablet/iPhone layouts), and M2 (SSE live-sync for events/todos, recurring
+events wired to real RRULE persistence + read-time expansion, todo due
+dates + overdue sort-to-top wired to a real `due_at` column, the three
+validation/error-surfacing bug fixes, delete-affordance and event-editing).
+The hide-completed-todos toggle and notification opt-in are still UI-only
+per ARCHITECTURE.md's M2 scope (no backend persistence for either is
+planned/needed — hide-completed is deliberately per-device localStorage,
+and the notification prompt is a pre-permission explainer only, real Web
+Push wiring is M5).
 
 ## Running
 
@@ -47,27 +51,27 @@ with `workers: 1`, serially, sharing one backend/DB):
 | 12 | `person-colors.spec.ts` | API-created unassigned-person event. |
 | 13 | `add-event.spec.ts` | Double-submit observation. |
 | 14 | `add-event.spec.ts` | XSS/special-characters title. |
+| 15 | `recurring-events.spec.ts` | Weekly recurrence expansion correctness (checked via the API over a wide range, not grid navigation — see the spec file's header comment). |
+| 16 | `recurring-events.spec.ts` | Editing a recurring event (whole-series rename). |
+| 17 | `recurring-events.spec.ts` | Deleting a recurring event (whole-series delete). |
+| 18 | `recurring-events.spec.ts` | Repeats field pre-fill on edit. |
+| 19 | `recurring-events.spec.ts` | Non-recurring regression check (`recurrenceRule: null`, exactly one occurrence). |
+| 20 | `live-sync.spec.ts` | SSE: create, two-client. |
+| 21 | `live-sync.spec.ts` | SSE: delete, two-client. |
 
-Todos are dateless/global, so `add-todo.spec.ts` isolates itself with
-`Date.now()`-suffixed unique text instead of day offsets.
+Todos are dateless/global, so `add-todo.spec.ts` and `todo-due-dates.spec.ts`
+isolate themselves with `Date.now()`-suffixed unique text instead of day
+offsets. `live-sync.spec.ts`'s todo test does the same.
 
-## Known-failing tests (documenting real bugs, not test bugs)
+## Formerly-known-failing tests — now fixed
 
-A few tests assert the *intended* behavior from the task spec / plain good
-UX rather than current (buggy) behavior, and are expected to fail until the
-underlying app bug is fixed — see the QA report for full detail:
-
-- `add-event.spec.ts` → blank title is silently saved as "Untitled event"
-  instead of being rejected.
-- `add-event.spec.ts` → an overlong title that the backend correctly
-  rejects (400) fails silently in the UI (sheet closes, no error shown, no
-  event created).
-- `add-todo.spec.ts` → same silent-failure pattern for overlong todo text.
-
-Additionally: **the whole app currently fails to render at all** (blank
-white screen, uncaught `TypeError` reading `.get` of `undefined`) because
-`App.tsx` doesn't pass the `dueDates` prop that `TodoList.tsx` requires —
-see the QA report's top finding. Until that one-line wiring bug is fixed,
-every test in this suite fails as a downstream consequence, not because the
-suite itself is wrong. Re-run `npm run test:e2e` after that fix lands to get
-the real M1 signal.
+`add-event.spec.ts` and `add-todo.spec.ts` each still contain the same
+adversarial tests the independent QA pass originally wrote against the
+*intended* behavior (reject a blank title client-side; surface a visible
+error when the backend correctly rejects an overlong title/text). Those
+tests used to be documented here as expected-failing, encoding real bugs.
+M2 fixed the underlying app code (`AddEventSheet.tsx`'s `handleSave`,
+`TodoList.tsx`, `App.tsx`'s mutation wiring, `lib/queries.ts`'s `onError`,
+new `lib/errors.ts`) rather than the tests, so they now pass like everything
+else in the suite — nothing in this suite is expected to fail on a clean
+run.

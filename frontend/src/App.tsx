@@ -6,6 +6,8 @@ import { AddEventSheet } from "./components/AddEventSheet";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { cx } from "./lib/cx";
 import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth } from "./lib/dateUtils";
+import { friendlyErrorMessage } from "./lib/errors";
+import { useLiveSync } from "./lib/useLiveSync";
 import {
   useCreateEvent,
   useCreateTodo,
@@ -66,12 +68,8 @@ function App() {
   // sheet is in create mode. Cleared whenever the sheet closes so the next
   // "+" tap always starts fresh.
   const [editingEvent, setEditingEvent] = useState<EventRecord | null>(null);
-  // M2 UI-only mock (ARCHITECTURE.md §8 / §14): `todos.due_at` isn't a real
-  // column yet and no route accepts it — this just keeps the due date the
-  // quick-add form collected, keyed by the real todo id once it comes back
-  // from the create mutation, so the interaction can be reviewed before the
-  // persistence work happens. Lost on refresh; that's expected for now.
-  const [mockDueDates, setMockDueDates] = useState<Map<number, string>>(new Map());
+
+  useLiveSync();
 
   // M2 UI-only mock (ARCHITECTURE.md §8a): the real trigger is "first time
   // the installed PWA is opened," which needs real install/launch detection
@@ -254,29 +252,12 @@ function App() {
 
         <TodoList
           todos={todosQuery.data ?? []}
-          dueDates={mockDueDates}
+          addError={createTodo.error ? friendlyErrorMessage(createTodo.error) : null}
           onAdd={(text, notes, dueDate) => {
-            createTodo.mutate(
-              { text, notes },
-              {
-                onSuccess: (created) => {
-                  if (dueDate) {
-                    setMockDueDates((prev) => new Map(prev).set(created.id, dueDate));
-                  }
-                },
-              },
-            );
+            createTodo.mutate({ text, notes, dueAt: dueDate });
           }}
           onToggle={(id, completed) => updateTodo.mutate({ id, input: { completed } })}
-          onDelete={(id) => {
-            deleteTodo.mutate(id);
-            setMockDueDates((prev) => {
-              if (!prev.has(id)) return prev;
-              const next = new Map(prev);
-              next.delete(id);
-              return next;
-            });
-          }}
+          onDelete={(id) => deleteTodo.mutate(id)}
         />
       </main>
 
@@ -287,18 +268,44 @@ function App() {
         selectedDate={selectedDate}
         people={peopleQuery.data ?? []}
         editingEvent={editingEvent}
+        error={
+          editingEvent
+            ? updateEvent.isError
+              ? friendlyErrorMessage(updateEvent.error)
+              : null
+            : createEvent.isError
+              ? friendlyErrorMessage(createEvent.error)
+              : null
+        }
         onClose={() => {
           setAddEventOpen(false);
           setEditingEvent(null);
+          createEvent.reset();
+          updateEvent.reset();
         }}
         onSave={(input, editingId) => {
+          // Only close/clear on success — a rejected mutation (e.g. a
+          // 200-char title cap) now leaves the sheet open with its error
+          // banner visible instead of closing unconditionally (see
+          // ARCHITECTURE.md M2 bug report #2).
           if (editingId != null) {
-            updateEvent.mutate({ id: editingId, input });
+            updateEvent.mutate(
+              { id: editingId, input },
+              {
+                onSuccess: () => {
+                  setAddEventOpen(false);
+                  setEditingEvent(null);
+                },
+              },
+            );
           } else {
-            createEvent.mutate(input);
+            createEvent.mutate(input, {
+              onSuccess: () => {
+                setAddEventOpen(false);
+                setEditingEvent(null);
+              },
+            });
           }
-          setAddEventOpen(false);
-          setEditingEvent(null);
         }}
       />
     </div>

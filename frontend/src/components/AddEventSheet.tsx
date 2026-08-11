@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { format } from "date-fns";
 import { cx } from "../lib/cx";
 import { dayDetailLabel } from "../lib/dateUtils";
-import { defaultRepeatValue, type RepeatValue } from "../lib/recurrence";
+import { defaultRepeatValue, repeatValueFromRule, ruleFromRepeatValue, type RepeatValue } from "../lib/recurrence";
 import { RepeatField } from "./RepeatField";
 import type { CreateEventInput, EventRecord, PersonRecord } from "../types";
 
@@ -15,6 +15,10 @@ interface AddEventSheetProps {
    * ARCHITECTURE.md M2 delete-affordance follow-up: editing was the other
    * half of that gap). Null/undefined means "creating a new event". */
   editingEvent?: EventRecord | null;
+  /** Message from the active create/update mutation, if it failed
+   * server-side (e.g. a 200-char title cap rejection) — see
+   * ARCHITECTURE.md M2 bug report #2. Null/undefined shows no banner. */
+  error?: string | null;
   onClose: () => void;
   /** Called on save with the built payload. `editingId` is the id being
    * edited (edit mode) or undefined (create mode) — one callback, one
@@ -35,7 +39,7 @@ function startOfDay(date: Date): Date {
   return d;
 }
 
-export function AddEventSheet({ open, selectedDate, people, editingEvent, onClose, onSave }: AddEventSheetProps) {
+export function AddEventSheet({ open, selectedDate, people, editingEvent, error, onClose, onSave }: AddEventSheetProps) {
   const titleId = useId();
   const isEditing = editingEvent != null;
   // The date the sheet operates on: the editing event's own date when
@@ -43,14 +47,15 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, onClos
   // move the event), otherwise whichever day was tapped to add to.
   const effectiveDate = editingEvent ? new Date(editingEvent.startAt) : selectedDate;
   const [title, setTitle] = useState("");
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [allDay, setAllDay] = useState(false);
   const [startTime, setStartTime] = useState("15:00");
   const [endTime, setEndTime] = useState("16:00");
   const [personId, setPersonId] = useState<number | null>(null);
-  // M2 UI-only mock (ARCHITECTURE.md §7a / §14) — visually complete, not
-  // persisted. Nothing here is sent in the onSave payload below, in either
-  // create or edit mode.
+  // Wired to `events.recurrence_rule` (ARCHITECTURE.md §7a) via
+  // ruleFromRepeatValue/repeatValueFromRule — see handleSave and the
+  // reset-on-open effect below.
   const [repeat, setRepeat] = useState<RepeatValue>(() => defaultRepeatValue(selectedDate));
 
   // Reset every time the sheet opens: to the event's current values when
@@ -59,6 +64,7 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, onClos
   // draft). Person defaults to the first seeded person, not "no one".
   useEffect(() => {
     if (!open) return;
+    setTitleError(null);
     if (editingEvent) {
       setTitle(editingEvent.title);
       setDescription(editingEvent.description ?? "");
@@ -66,7 +72,7 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, onClos
       setStartTime(format(new Date(editingEvent.startAt), "HH:mm"));
       setEndTime(format(new Date(editingEvent.endAt), "HH:mm"));
       setPersonId(editingEvent.personId);
-      setRepeat(defaultRepeatValue(new Date(editingEvent.startAt)));
+      setRepeat(repeatValueFromRule(editingEvent.recurrenceRule, new Date(editingEvent.startAt)));
     } else {
       setTitle("");
       setDescription("");
@@ -89,7 +95,17 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, onClos
   }, [open, onClose]);
 
   function handleSave() {
-    const trimmedTitle = title.trim() || "Untitled event";
+    const trimmedTitle = title.trim();
+    // ARCHITECTURE.md M2 bug report #1: a blank title used to be silently
+    // saved as "Untitled event" instead of being rejected. Reject it
+    // client-side, before any mutation fires — no server round-trip needed
+    // to know a blank title is invalid.
+    if (!trimmedTitle) {
+      setTitleError("Title is required.");
+      return;
+    }
+    setTitleError(null);
+
     let startAt: Date;
     let endAt: Date;
     if (allDay) {
@@ -109,6 +125,7 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, onClos
         endAt: endAt.toISOString(),
         allDay,
         personId,
+        recurrenceRule: ruleFromRepeatValue(repeat, effectiveDate),
       },
       editingEvent?.id,
     );
@@ -157,11 +174,20 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, onClos
           <input
             autoFocus
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              if (titleError) setTitleError(null);
+            }}
             placeholder="e.g. Piano lesson"
+            aria-invalid={titleError != null}
             className="w-full rounded-[var(--radius-control)] border border-[var(--color-line)] bg-[var(--color-bg)] px-2.5 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
           />
+          {titleError && <span className="text-[0.66rem] font-semibold text-[var(--color-accent)]">{titleError}</span>}
         </label>
+
+        {error && (
+          <p className="mb-3 rounded-lg bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-accent)]">{error}</p>
+        )}
 
         <div className="mb-3 flex flex-col gap-1">
           <span className="text-[0.66rem] font-bold tracking-wide text-[var(--color-ink-soft)] uppercase">

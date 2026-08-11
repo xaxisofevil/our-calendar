@@ -49,14 +49,23 @@ test.describe("Person color-coding", () => {
     const eric = SEEDED_PEOPLE.find((p) => p.label === "Eric")!;
     const lindsay = SEEDED_PEOPLE.find((p) => p.label === "Lindsay")!;
 
+    const panel = page.locator('section[aria-label="Selected day"]');
+
     await selectDay(page, day);
     await openAddEventSheet(page);
     await fillEventForm(page, { title: "Color test — Eric A", person: "Eric" });
     await saveEventForm(page);
+    // dotColors() reads computed styles with a one-shot (non-retrying)
+    // evaluate(), so it must run only after the create mutation's refetch
+    // has actually landed — waiting for the just-created title to render
+    // in day-detail (backed by the same query cache the grid dots read
+    // from) is a reliable signal of that, where a fixed sleep wouldn't be.
+    await expect(panel.getByText("Color test — Eric A")).toBeVisible();
 
     await openAddEventSheet(page);
     await fillEventForm(page, { title: "Color test — Lindsay A", person: "Lindsay" });
     await saveEventForm(page);
+    await expect(panel.getByText("Color test — Lindsay A")).toBeVisible();
 
     let colors = await dotColors(page, day);
     expect(colors.sort()).toEqual([hexToRgb(eric.color), hexToRgb(lindsay.color)].sort());
@@ -66,6 +75,7 @@ test.describe("Person color-coding", () => {
     await openAddEventSheet(page);
     await fillEventForm(page, { title: "Color test — Eric B", person: "Eric" });
     await saveEventForm(page);
+    await expect(panel.getByText("Color test — Eric B")).toBeVisible();
 
     colors = await dotColors(page, day);
     expect(colors.length).toBe(2);
@@ -77,6 +87,7 @@ test.describe("Person color-coding", () => {
     await openAddEventSheet(page);
     await fillEventForm(page, { title: "Color test — Gavin A", person: "Gavin" });
     await saveEventForm(page);
+    await expect(panel.getByText("Color test — Gavin A")).toBeVisible();
 
     colors = await dotColors(page, day);
     expect(colors.length).toBe(3);
@@ -84,7 +95,6 @@ test.describe("Person color-coding", () => {
 
     // Day-detail should show all 4 events created above, each with its own
     // person's correct accent color on its list-item dot.
-    const panel = page.locator('section[aria-label="Selected day"]');
     await expect(panel.getByText("Color test — Eric A")).toBeVisible();
     await expect(panel.getByText("Color test — Eric B")).toBeVisible();
     await expect(panel.getByText("Color test — Lindsay A")).toBeVisible();

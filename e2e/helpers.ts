@@ -132,6 +132,37 @@ export async function addTodo(page: Page, text: string, notes?: string) {
   await page.getByRole("button", { name: "Add item", exact: true }).click();
 }
 
+/** Same as addTodo, but also opens "+ add details" and fills the due-date
+ * date input — dueDate is a "YYYY-MM-DD" string (native <input type="date">
+ * format), e.g. from toDateInputValue() below. */
+export async function addTodoWithDueDate(page: Page, text: string, dueDate: string) {
+  const input = page.getByLabel("Add a to-do item");
+  await input.fill(text);
+  await page.getByRole("button", { name: "+ add details" }).click();
+  await page.getByLabel("Due date (optional)").fill(dueDate);
+  await page.getByRole("button", { name: "Add item", exact: true }).click();
+}
+
+/** "YYYY-MM-DD" for a given Date, in local time — matches the native
+ * <input type="date"> value format used by TodoList's due-date field and
+ * the `due_at` column (ARCHITECTURE.md §8/§11). */
+export function toDateInputValue(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function todoRow(page: Page, text: string) {
   return page.getByRole("checkbox", { name: text, exact: true });
+}
+
+/** Opens the (already-open) add/edit event sheet's Repeats dropdown and
+ * clicks the option whose visible label matches `labelPattern` — labels are
+ * computed relative to the event's anchor day (e.g. "Weekly on Thursday"),
+ * see frontend/src/lib/recurrence.ts#repeatQuickOptions. */
+export async function selectRepeatOption(page: Page, labelPattern: RegExp) {
+  const dialog = page.getByRole("dialog", { name: /New event|Edit event/ });
+  await dialog.locator('button[aria-haspopup="listbox"]').click();
+  await dialog.getByRole("option", { name: labelPattern }).click();
 }

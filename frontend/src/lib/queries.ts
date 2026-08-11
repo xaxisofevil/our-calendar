@@ -2,11 +2,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./api";
 import type { CreateEventInput, CreateTodoInput, UpdateEventInput, UpdateTodoInput } from "../types";
 
-// No SSE yet (that's explicitly M2 scope per ARCHITECTURE.md — the
-// household-shared to-do list + settings sync milestone). For now every
-// mutation just invalidates the relevant query key and React Query
-// refetches. Good enough for a single device exercising the UI; multi-device
-// live sync is the thing M2 adds on top of this same data layer.
+// Every mutation invalidates the relevant query key on success, same as
+// before M2 — the difference now is that OTHER clients also get invalidated
+// live via the SSE channel (see lib/useLiveSync.ts), not just the one that
+// made the change.
+//
+// onError here is deliberately just a console log for debugging visibility
+// — react-query already tracks `.error`/`.isError` on every mutation
+// automatically regardless of whether onError is defined, and that's what
+// callers (App.tsx) read to actually surface a message to the user (see
+// lib/errors.ts). This fixes the M2 bug report (ARCHITECTURE.md §14): a
+// rejected mutation used to fail completely silently, with nothing in the
+// console or the UI.
+function logMutationError(context: string) {
+  return (error: unknown) => {
+    console.error(`[mutation] ${context} failed:`, error);
+  };
+}
 
 export function useEventsQuery(start: string, end: string) {
   return useQuery({
@@ -37,6 +49,7 @@ export function useCreateEvent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
     },
+    onError: logMutationError("create event"),
   });
 }
 
@@ -47,6 +60,7 @@ export function useUpdateEvent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
     },
+    onError: logMutationError("update event"),
   });
 }
 
@@ -57,6 +71,7 @@ export function useDeleteEvent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
     },
+    onError: logMutationError("delete event"),
   });
 }
 
@@ -67,6 +82,7 @@ export function useCreateTodo() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
+    onError: logMutationError("create todo"),
   });
 }
 
@@ -77,6 +93,7 @@ export function useUpdateTodo() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
+    onError: logMutationError("update todo"),
   });
 }
 
@@ -87,5 +104,6 @@ export function useDeleteTodo() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
+    onError: logMutationError("delete todo"),
   });
 }

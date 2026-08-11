@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { format } from "date-fns";
 import type { TodoRecord } from "../types";
 import { cx } from "../lib/cx";
@@ -6,8 +6,9 @@ import { DeleteButton } from "./DeleteButton";
 
 interface TodoListProps {
   todos: TodoRecord[];
-  /** M2 UI-only mock — see App.tsx for why this isn't real API state yet. */
-  dueDates: Map<number, string>;
+  /** Message from the create-todo mutation, if it failed server-side (e.g.
+   * text over the 500-char limit) — see ARCHITECTURE.md M2 bug report #3. */
+  addError?: string | null;
   onAdd: (text: string, notes: string | null, dueDate: string | null) => void;
   onToggle: (id: number, completed: boolean) => void;
   onDelete: (id: number) => void;
@@ -70,7 +71,7 @@ function isOverdue(dueDate: string): boolean {
   return parseDueDate(dueDate) < today;
 }
 
-export function TodoList({ todos, dueDates, onAdd, onToggle, onDelete }: TodoListProps) {
+export function TodoList({ todos, addError, onAdd, onToggle, onDelete }: TodoListProps) {
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -108,6 +109,18 @@ export function TodoList({ todos, dueDates, onAdd, onToggle, onDelete }: TodoLis
 
   const visibleTodos = hideCompleted ? todos.filter((t) => !t.completed) : todos;
   const hiddenCount = todos.length - visibleTodos.length;
+
+  // ARCHITECTURE.md §8: incomplete overdue items float to the top,
+  // most-overdue-first — purely a display sort, nothing auto-mutates.
+  // Completed items (and everything else) keep their existing relative
+  // (position) order.
+  const sortedTodos = useMemo(() => {
+    const overdueItems = visibleTodos.filter((t) => !t.completed && t.dueAt && isOverdue(t.dueAt));
+    overdueItems.sort((a, b) => a.dueAt!.localeCompare(b.dueAt!));
+    const overdueIds = new Set(overdueItems.map((t) => t.id));
+    const rest = visibleTodos.filter((t) => !overdueIds.has(t.id));
+    return [...overdueItems, ...rest];
+  }, [visibleTodos]);
 
   return (
     <section
@@ -158,6 +171,12 @@ export function TodoList({ todos, dueDates, onAdd, onToggle, onDelete }: TodoLis
           </button>
         </div>
 
+        {addError && (
+          <p className="rounded-lg bg-[var(--color-accent)]/10 px-2.5 py-1.5 text-[0.68rem] text-[var(--color-accent)]">
+            {addError}
+          </p>
+        )}
+
         {detailsOpen ? (
           <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-[var(--color-line)] p-2">
             <label className="flex flex-col gap-1">
@@ -193,8 +212,8 @@ export function TodoList({ todos, dueDates, onAdd, onToggle, onDelete }: TodoLis
       </div>
 
       <ul className="flex flex-col gap-1.5">
-        {visibleTodos.map((todo) => {
-          const dueDateValue = dueDates.get(todo.id);
+        {sortedTodos.map((todo) => {
+          const dueDateValue = todo.dueAt;
           const overdue = dueDateValue ? !todo.completed && isOverdue(dueDateValue) : false;
           return (
             <li key={todo.id}>

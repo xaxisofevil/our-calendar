@@ -150,28 +150,19 @@ test.describe("Add-event flow", () => {
       await fillEventForm(page, { title: longTitle });
       await saveEventForm(page);
 
-      // toHaveCSS auto-retries, so this deterministically waits out the
-      // sheet's close transition rather than racing its opacity timing.
-      await expect(page.getByRole("dialog", { name: "New event" })).toHaveCSS("opacity", "0");
-
-      // KNOWN BUG (see QA report): backend/src/lib/validation.ts caps
-      // event titles at 200 chars and correctly 400s a 250-char title, but
-      // App.tsx's onSave does `createEvent.mutate(input); setAddEventOpen(
-      // false)` with no onError handling — the sheet closes immediately
-      // regardless of whether the POST succeeds, so the user sees no error
-      // at all and the event is silently never created. This asserts the
-      // desired behavior (a visible error, since the event is correctly
-      // and silently never created) and will fail until mutation errors
-      // are surfaced to the user.
-      const errorShown = await page
-        .getByText(/too long|error|failed/i)
-        .first()
-        .isVisible()
-        .catch(() => false);
-      expect(errorShown).toBe(true);
+      // FIXED (was the QA report's bug #2): backend/src/lib/validation.ts
+      // caps event titles at 200 chars and correctly 400s a 250-char title;
+      // App.tsx's onSave now only closes the sheet on the mutation's
+      // onSuccess (see lib/queries.ts / lib/errors.ts), so on a rejected
+      // save the sheet stays open with its error banner visible instead of
+      // closing as if it worked — that's a clearer place for the user to
+      // see (and fix) the problem than a page-level toast would be.
+      const dialog = page.getByRole("dialog", { name: "New event" });
+      await expect(dialog).toHaveCSS("opacity", "1");
+      await expect(dialog.getByText(/too long/i)).toBeVisible();
 
       // Confirms the other half of the bug report: the event really is
-      // silently absent, not just hidden from view.
+      // absent, not just hidden from view.
       const panel = page.locator('section[aria-label="Selected day"]');
       await expect(panel.getByText(longTitle)).toHaveCount(0);
     });

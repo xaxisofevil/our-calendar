@@ -35,6 +35,7 @@ sqlite.exec(`
     id            INTEGER PRIMARY KEY,
     text          TEXT NOT NULL,
     notes         TEXT,
+    due_at        TEXT,
     completed     INTEGER NOT NULL DEFAULT 0,
     list          TEXT NOT NULL DEFAULT 'household',
     position      INTEGER NOT NULL,
@@ -59,6 +60,7 @@ sqlite.exec(`
     start_at           TEXT NOT NULL,
     end_at             TEXT NOT NULL,
     all_day            INTEGER NOT NULL DEFAULT 0,
+    recurrence_rule    TEXT,
     updated_at         TEXT NOT NULL
   );
 `);
@@ -74,7 +76,9 @@ function ensureColumn(table: string, column: string, ddl: string) {
   }
 }
 ensureColumn("todos", "notes", "notes TEXT");
+ensureColumn("todos", "due_at", "due_at TEXT");
 ensureColumn("events", "person_id", "person_id INTEGER REFERENCES people(id)");
+ensureColumn("events", "recurrence_rule", "recurrence_rule TEXT");
 
 export const db = drizzle(sqlite, { schema });
 export { sqlite };

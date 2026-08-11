@@ -16,12 +16,17 @@ export interface EventRecord {
   startAt: string; // ISO 8601
   endAt: string; // ISO 8601
   allDay: boolean;
+  // Bare RFC 5545 RRULE text (no DTSTART/RRULE: prefix), null for
+  // non-recurring events — see ARCHITECTURE.md §7a. Set on every expanded
+  // occurrence the same as on the master row.
+  recurrenceRule: string | null;
 }
 
 export interface TodoRecord {
   id: number;
   text: string;
   notes: string | null;
+  dueAt: string | null; // ISO 8601 date (YYYY-MM-DD), optional — §8/§11
   completed: boolean;
   list: string;
   position: number;
@@ -35,6 +40,7 @@ export interface CreateEventInput {
   endAt: string;
   allDay?: boolean;
   personId?: number | null;
+  recurrenceRule?: string | null;
 }
 
 export interface UpdateEventInput {
@@ -45,17 +51,20 @@ export interface UpdateEventInput {
   endAt?: string;
   allDay?: boolean;
   personId?: number | null;
+  recurrenceRule?: string | null;
 }
 
 export interface CreateTodoInput {
   text: string;
   notes?: string | null;
+  dueAt?: string | null;
   list?: string;
 }
 
 export interface UpdateTodoInput {
   text?: string;
   notes?: string | null;
+  dueAt?: string | null;
   completed?: boolean;
   position?: number;
   list?: string;

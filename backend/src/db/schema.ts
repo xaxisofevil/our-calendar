@@ -9,6 +9,9 @@ export const todos = sqliteTable("todos", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   text: text("text").notNull(),
   notes: text("notes"),
+  // Optional ISO 8601 date (YYYY-MM-DD); ARCHITECTURE.md §8/§11 — an
+  // attribute on the flat dateless list, not a second calendar.
+  dueAt: text("due_at"),
   completed: integer("completed", { mode: "boolean" }).notNull().default(false),
   list: text("list").notNull().default("household"),
   position: integer("position").notNull(),
@@ -47,5 +50,10 @@ export const events = sqliteTable("events", {
   startAt: text("start_at").notNull(),
   endAt: text("end_at").notNull(),
   allDay: integer("all_day", { mode: "boolean" }).notNull().default(false),
+  // RFC 5545 RRULE string (e.g. "FREQ=WEEKLY;BYDAY=TH"), NULL for
+  // non-recurring events — see ARCHITECTURE.md §7a/§11. This row is always
+  // the "master" event; occurrences are computed at read time, never
+  // materialized as rows (see routes/events.ts GET handler).
+  recurrenceRule: text("recurrence_rule"),
   updatedAt: text("updated_at").notNull(),
 });
