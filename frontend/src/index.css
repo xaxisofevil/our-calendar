@@ -16,6 +16,56 @@ body {
   * {
     transition-duration: 0.001ms !important;
   }
+
+  /* ARCHITECTURE.md §8b: swap the imminent-event pulse (defined below) for
+     a static tinted highlight instead of an ongoing animation — same
+     information, no motion. transition-duration above doesn't touch these
+     since they're @keyframes `animation`s, not `transition`s. */
+  .imminent-dot,
+  .imminent-row {
+    animation: none !important;
+  }
+  .imminent-dot {
+    background-color: var(--color-pulse) !important;
+  }
+  .imminent-row {
+    background-color: var(--color-pulse-tint) !important;
+  }
+}
+
+/* ARCHITECTURE.md §8b: imminent-event pulse. Toggled by a lightweight
+   client-side timer (frontend/src/lib/imminent.ts, every 30-60s, not
+   per-frame) recomputing which loaded events are starting within the lead
+   window; the pulse itself is plain CSS the compositor handles cheaply —
+   no per-frame JS, safe to leave running for hours on an older tablet.
+   Uses the active skin's own --color-pulse/--color-pulse-tint tokens
+   (tokens.css), fading toward the background — never a hardcoded color.
+   Scope is deliberately narrow: only MonthGrid's per-day dot and
+   DayDetailPanel's own event row ever get these classes. */
+@keyframes imminent-pulse-dot {
+  0%,
+  100% {
+    background-color: var(--color-pulse);
+  }
+  50% {
+    background-color: var(--color-bg);
+  }
+}
+.imminent-dot {
+  animation: imminent-pulse-dot 2.4s ease-in-out infinite;
+}
+
+@keyframes imminent-pulse-row {
+  0%,
+  100% {
+    background-color: var(--color-bg);
+  }
+  50% {
+    background-color: var(--color-pulse-tint);
+  }
+}
+.imminent-row {
+  animation: imminent-pulse-row 2.4s ease-in-out infinite;
 }
 
 /* Custom checkbox-as-switch for the add-event "All day" toggle. Kept as a

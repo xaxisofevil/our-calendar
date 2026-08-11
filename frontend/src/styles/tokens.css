@@ -26,6 +26,17 @@
   --color-accent-ink: #fbf2e6;
   --color-good: #4b6a4c;
 
+  /* §8b imminent-event pulse (index.css defines the actual @keyframes/
+     classes — these are just this skin's colors for it). --color-pulse is
+     its own token, defaulted to --color-accent, so a future skin can tune
+     pulse intensity independently of the accent it uses everywhere else.
+     --color-pulse-tint is --color-pulse at ~15% alpha (same hex+alpha
+     convention as the person-color pill background in DayDetailPanel.tsx)
+     — the day-detail row's mid-pulse color, and its static
+     prefers-reduced-motion fallback. */
+  --color-pulse: var(--color-accent);
+  --color-pulse-tint: #b0512e26;
+
   --font-display: Charter, "Iowan Old Style", Georgia, "Times New Roman", serif;
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
@@ -56,6 +67,9 @@
     --color-accent: #e07a50;
     --color-accent-ink: #271505;
     --color-good: #89ac87;
+
+    --color-pulse: var(--color-accent);
+    --color-pulse-tint: #e07a503d;
   }
 }
 

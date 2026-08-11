@@ -1,6 +1,8 @@
 import { format } from "date-fns";
 import type { EventRecord, PersonRecord } from "../types";
+import { cx } from "../lib/cx";
 import { dayDetailLabel } from "../lib/dateUtils";
+import { eventImminentKey } from "../lib/imminent";
 import { DeleteButton } from "./DeleteButton";
 
 interface DayDetailPanelProps {
@@ -10,6 +12,11 @@ interface DayDetailPanelProps {
   onAddEvent: () => void;
   onEditEvent: (event: EventRecord) => void;
   onDeleteEvent: (id: number) => void;
+  // ARCHITECTURE.md §8b — keys from lib/imminent.ts#useImminentEventKeys.
+  // `events` here is already scoped to the selected day, so pulsing an
+  // event's row this way automatically satisfies "only if that day is
+  // currently selected/visible" — nothing extra to check.
+  imminentEventKeys?: Set<string>;
 }
 
 export function DayDetailPanel({
@@ -19,6 +26,7 @@ export function DayDetailPanel({
   onAddEvent,
   onEditEvent,
   onDeleteEvent,
+  imminentEventKeys,
 }: DayDetailPanelProps) {
   const hasEvents = events.length > 0;
 
@@ -51,6 +59,7 @@ export function DayDetailPanel({
           {events.map((event) => {
             const person = event.personId != null ? personById.get(event.personId) : undefined;
             const accentColor = person?.color ?? "var(--color-accent)";
+            const imminent = imminentEventKeys?.has(eventImminentKey(event)) ?? false;
             return (
               <li
                 key={event.id}
@@ -64,7 +73,10 @@ export function DayDetailPanel({
                     onEditEvent(event);
                   }
                 }}
-                className="cursor-pointer rounded-lg bg-[var(--color-bg)] px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                className={cx(
+                  "cursor-pointer rounded-lg bg-[var(--color-bg)] px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
+                  imminent && "imminent-row",
+                )}
                 style={{ borderRadius: "4px 12px 12px 4px", borderLeft: `3px dashed ${accentColor}` }}
               >
                 <div className="flex items-center gap-2">

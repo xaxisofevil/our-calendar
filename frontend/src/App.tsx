@@ -7,6 +7,7 @@ import { NotificationPrompt } from "./components/NotificationPrompt";
 import { cx } from "./lib/cx";
 import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth } from "./lib/dateUtils";
 import { friendlyErrorMessage } from "./lib/errors";
+import { useImminentEventKeys } from "./lib/imminent";
 import { useLiveSync } from "./lib/useLiveSync";
 import {
   useCreateEvent,
@@ -135,6 +136,12 @@ function App() {
 
   const selectedDayEvents = eventsByDay.get(dateKey(selectedDate)) ?? [];
 
+  // ARCHITECTURE.md §8b: which currently-loaded events (this month's grid
+  // range) are starting soon, recomputed on a cheap interval — see
+  // lib/imminent.ts. Shared between MonthGrid's dot and DayDetailPanel's
+  // row so there's exactly one "what's imminent" computation, not two.
+  const imminentEventKeys = useImminentEventKeys(eventsQuery.data ?? []);
+
   const personById = useMemo(() => {
     const map = new Map<number, PersonRecord>();
     for (const person of peopleQuery.data ?? []) map.set(person.id, person);
@@ -199,6 +206,7 @@ function App() {
           eventsByDay={eventsByDay}
           personById={personById}
           onSelectDate={handleSelectDate}
+          imminentEventKeys={imminentEventKeys}
         />
 
         {/* Day detail: an always-visible column on tablet (md+), a
@@ -245,6 +253,7 @@ function App() {
                   setAddEventOpen(true);
                 }}
                 onDeleteEvent={(id) => deleteEvent.mutate(id)}
+                imminentEventKeys={imminentEventKeys}
               />
             </div>
           </div>
