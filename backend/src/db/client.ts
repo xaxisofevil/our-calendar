@@ -8,8 +8,17 @@ import * as schema from "./schema.js";
 // backend/src/db/client.ts -> backend/data/*.sqlite, independent of cwd so
 // `npm run dev` (tsx) and `node dist/index.js` (built) both land the DB file
 // in the same place.
+//
+// DB_DIR_NAME override exists specifically so isolated test runs (see
+// playwright.config.ts / backend/scripts/reset-and-dev.mjs) can NEVER touch
+// the real dev/prod database, regardless of which checkout or port they run
+// from. Port-based isolation alone is not enough: this path is derived from
+// __dirname, not from the port, so two backend instances on different ports
+// but the same checkout would otherwise share the same database file — this
+// env var is the actual isolation mechanism, not an optional nicety.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, "..", "..", "data");
+const dataDirName = process.env.DB_DIR_NAME || "data";
+const dataDir = path.join(__dirname, "..", "..", dataDirName);
 fs.mkdirSync(dataDir, { recursive: true });
 const dbPath = path.join(dataDir, "our-calendar.sqlite");
 
