@@ -52,6 +52,24 @@
   --numeral-size: 0.95rem;
   --numeral-weight: 800;
 
+  /* Card/page heading size (month title, "Day List"/"To-Do" card headings)
+     — its own token so the md+ bump below can keep it the clearly-dominant
+     heading relative to the numeral bump, same mechanism as --numeral-size. */
+  --card-title-size: 1.25rem;
+
+  /* Month-grid event dots, one token per distinct-person count (1-4,
+   * MAX_DOTS in MonthGrid.tsx) — size scales down as count goes up so
+   * several dots still fit cleanly side-by-side in a cell without crowding,
+   * while a single dot stays the strong, glanceable signal it should be.
+   * Mobile-first base sizes here, bumped at md+ below — same two-tier
+   * token pattern as --numeral-size, not one fixed size across breakpoints
+   * (a cramped ~50px mobile cell can't carry the same dot size a tall
+   * tablet cell can). */
+  --dot-size-1: 0.5rem; /* 8px */
+  --dot-size-2: 0.375rem; /* 6px */
+  --dot-size-3: 0.3125rem; /* 5px */
+  --dot-size-4: 0.25rem; /* 4px */
+
   /* Subtle paper-grain overlay, used by .skin-grain (see App.tsx root). */
   --grain-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
@@ -70,6 +88,39 @@
 
     --color-pulse: var(--color-accent);
     --color-pulse-tint: #e07a503d;
+  }
+}
+
+/* Tablet layout fill (ARCHITECTURE.md §4 / the M2 "fill the fridge-tablet
+   screen" sizing pass): on md+ viewports MonthGrid's day cells drop their
+   aspect-square cap and stretch to a much taller grid row (see
+   MonthGrid.tsx), since the month grid is the primary "glance and see the
+   month" element. Bump the day-of-month numeral to match that bigger cell
+   so it still reads as a confident number, not a small digit adrift in a
+   big cell — kept as a token override (not a hardcoded style) so a future
+   skin can tune its own tablet numeral size independently. Mobile is
+   untouched; its grid stays the compact, content-sized square layout.
+
+   Hierarchy fix (direct feedback on the first version of this pass): the
+   numeral bump originally went to 1.7rem, which read as *bigger* than the
+   card headings (month title / "Day List" / "To-Do") — wrong hierarchy for
+   a page whose heading should dominate at a glance. --card-title-size now
+   grows at the same breakpoint, comfortably ahead of the (slightly walked
+   back) numeral size, so the heading reads as "the heading" and numerals
+   read as prominent-but-secondary content within each cell. */
+@media (min-width: 768px) {
+  [data-skin="paper-ink"] {
+    --numeral-size: 1.3rem;
+    --card-title-size: 1.875rem;
+
+    /* Dot sizes follow suit at md+ (direct feedback: fine on tablet, too
+       big on an actual phone at the mobile-base sizes above) — same
+       count-scales-down logic, just a bigger tablet range to match the
+       much taller/wider day cells there. */
+    --dot-size-1: 0.875rem; /* 14px */
+    --dot-size-2: 0.625rem; /* 10px */
+    --dot-size-3: 0.5rem; /* 8px */
+    --dot-size-4: 0.375rem; /* 6px */
   }
 }
 

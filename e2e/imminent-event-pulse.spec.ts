@@ -66,9 +66,12 @@ test.describe("Imminent-event pulse (ARCHITECTURE.md §8b)", () => {
     await expect(farOutRow).not.toHaveClass(/imminent-row/);
 
     // Dot-level: 3 distinct people = 3 dots on today's cell, exactly one
-    // (Lindsay's) pulsing.
+    // (Lindsay's) pulsing. (Dot size is now a --dot-size-N token read via
+    // inline style, not a Tailwind size class — see MonthGrid.tsx's
+    // dotSizeVar — so this counts the dots' shared structural wrapper
+    // instead of a hardcoded size class.)
     const cell = page.locator('section[aria-label="Month"] [aria-current="date"]');
-    await expect(cell.locator("span.h-1.w-1")).toHaveCount(3);
+    await expect(cell.locator('span[aria-hidden="true"] > span')).toHaveCount(3);
     await expect(cell.locator("span.imminent-dot")).toHaveCount(1);
 
     // Jump the virtual clock 11 minutes forward — past the "imminent" event's

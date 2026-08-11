@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { addDaysFromToday, dayCell, fillEventForm, openAddEventSheet, saveEventForm, selectDay } from "./helpers";
+import { addDaysFromToday, dayCell, fillEventForm, openAddEventSheet, saveEventForm, selectDay, swipeRowOpen } from "./helpers";
 
 // SSE live-sync (ARCHITECTURE.md §3/§12/§14 M2): GET /api/stream broadcasts
 // "events:changed" / "todos:changed", and every *other* connected client
@@ -79,6 +79,7 @@ test.describe("Live sync (SSE)", () => {
     await expect(panel2.getByText("Synced then deleted")).toBeVisible({ timeout: 10_000 });
 
     const panel1 = page1.locator('section[aria-label="Selected day"]');
+    await swipeRowOpen(page1, panel1.locator("li", { hasText: "Synced then deleted" }));
     await panel1.getByRole("button", { name: "Delete Synced then deleted" }).click();
     await expect(panel1.getByText("Synced then deleted")).toHaveCount(0);
 

@@ -15,13 +15,19 @@ test.describe("Month grid", () => {
     const headers = grid.locator("div.grid.grid-cols-7").first().locator("> div");
     await expect(headers).toHaveText(["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]);
 
-    const dayButtons = grid.getByRole("button");
+    // Scoped to the day-cells grid specifically (the *last* of the two
+    // `div.grid.grid-cols-7` elements — weekday headers is the first) —
+    // MonthGrid's own card header (month title, prev/next/Today, expand)
+    // now also lives inside `section[aria-label="Month"]` and contributes
+    // its own <button>s, so an unscoped grid.getByRole("button") would
+    // over-count.
+    const dayButtons = grid.locator("div.grid.grid-cols-7").last().getByRole("button");
     await expect(dayButtons).toHaveCount(42);
   });
 
   test("grid always starts on a Sunday and ends on a Saturday", async ({ page }) => {
     const grid = page.locator('section[aria-label="Month"]');
-    const dayButtons = grid.getByRole("button");
+    const dayButtons = grid.locator("div.grid.grid-cols-7").last().getByRole("button");
 
     const firstLabel = (await dayButtons.first().getAttribute("aria-label")) ?? "";
     const lastLabel = (await dayButtons.last().getAttribute("aria-label")) ?? "";

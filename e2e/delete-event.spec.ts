@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { addDaysFromToday, dayCell, fillEventForm, openAddEventSheet, saveEventForm, selectDay } from "./helpers";
+import { addDaysFromToday, dayCell, fillEventForm, openAddEventSheet, saveEventForm, selectDay, swipeRowOpen } from "./helpers";
 
 test.describe("Delete event", () => {
   test.beforeEach(async ({ page }) => {
@@ -20,6 +20,9 @@ test.describe("Delete event", () => {
     const cell = dayCell(page, day);
     await expect(cell).toHaveAttribute("aria-label", /1 event/);
 
+    // Delete now lives behind a swipe-right reveal (SwipeRevealRow), not an
+    // always-visible button — swipe the row open first.
+    await swipeRowOpen(page, panel.locator("li", { hasText: "Vet appointment" }));
     await panel.getByRole("button", { name: "Delete Vet appointment" }).click();
 
     await expect(panel.getByText("Vet appointment")).toHaveCount(0);
@@ -43,6 +46,7 @@ test.describe("Delete event", () => {
     await expect(panel.getByText("Keep me")).toBeVisible();
     await expect(panel.getByText("Delete me")).toBeVisible();
 
+    await swipeRowOpen(page, panel.locator("li", { hasText: "Delete me" }));
     await panel.getByRole("button", { name: "Delete Delete me" }).click();
 
     await expect(panel.getByText("Delete me")).toHaveCount(0);

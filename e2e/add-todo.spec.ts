@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { addTodo, todoRow } from "./helpers";
+import { addTodo, swipeRowOpen, todoRow } from "./helpers";
 
 // Todos are dateless/global (ARCHITECTURE.md §8), so unlike events these
 // tests can't isolate themselves onto a particular day — each uses a
@@ -71,6 +71,9 @@ test.describe("Add-todo flow", () => {
     const row = todoRow(page, text);
     await expect(row).toBeVisible();
 
+    // Delete now lives behind a swipe-right reveal (SwipeRevealRow), not an
+    // always-visible button — swipe the row open first.
+    await swipeRowOpen(page, page.locator("li", { has: row }));
     await page.getByRole("button", { name: `Delete ${text}` }).click();
     await expect(row).toHaveCount(0);
   });

@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import type { ReactNode } from "react";
 import type { EventRecord, PersonRecord } from "../types";
 import { cx } from "../lib/cx";
 import { eventImminentKey } from "../lib/imminent";
@@ -16,6 +17,32 @@ interface MonthGridProps {
   // don't care about the feature (e.g. a future storybook/test render)
   // aren't forced to pass an empty Set.
   imminentEventKeys?: Set<string>;
+  // Tablet card header (this pass): the Calendar card now owns its own
+  // month title + prev/next/Today, living directly above its grid instead
+  // of in a page-wide header bar — see App.tsx's global <header>, which
+  // keeps an identical (mobile-only) copy of these same controls for the
+  // unchanged mobile layout. hidden md:flex below. No expand button here
+  // (deliberately, per direct feedback) — Calendar already defaults to
+  // half the screen, so an expand-to-modal affordance would gain nothing
+  // the way it does for Day List/To-Do going 25% → 50%; it's simply
+  // always the fixed left-half card.
+  monthTitleText: string;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
+  onToday: () => void;
+}
+
+function NavButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="grid h-7 w-7 flex-none cursor-pointer place-items-center rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] text-sm text-[var(--color-ink-soft)]"
+    >
+      {children}
+    </button>
+  );
 }
 
 // Defensive cap on rendered dots — only 2 people exist today, but the grid
@@ -49,6 +76,21 @@ function distinctDotEntries(dayEvents: EventRecord[], personById: Map<number, Pe
     .map(([key, color]) => ({ key, color }));
 }
 
+/** Dot size scales inversely with how many distinct people have something
+ * that day (direct feedback): a single dot is the strong, glanceable
+ * signal it should be; 2-4 dots shrink just enough to keep fitting cleanly
+ * side-by-side in the cell without crowding/overlapping. Reads the
+ * `--dot-size-N` tokens (tokens.css) rather than a fixed Tailwind size
+ * class — those tokens are themselves mobile-base / md+-bumped (same
+ * two-tier pattern as --numeral-size), since a size that reads right on a
+ * tall tablet cell is too large on an actual phone's compact cell. Applies
+ * at every breakpoint via the tokens — this is a data-driven sizing rule,
+ * not part of the tablet-only layout restructure. */
+function dotSizeVar(count: number): string {
+  const n = Math.min(Math.max(count, 1), MAX_DOTS);
+  return `var(--dot-size-${n})`;
+}
+
 /** Which dot keys (see distinctDotEntries) have at least one imminent event
  * that day — i.e. should pulse. A person with two events that day, only one
  * of which is imminent, still gets a pulsing dot (the dot represents "this
@@ -70,15 +112,42 @@ export function MonthGrid({
   personById,
   onSelectDate,
   imminentEventKeys,
+  monthTitleText,
+  onPrevMonth,
+  onNextMonth,
+  onToday,
 }: MonthGridProps) {
   const days = getMonthGridDays(monthAnchor);
 
   return (
     <section
       aria-label="Month"
-      className="rounded-[var(--radius-panel)] bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)]"
+      className="rounded-[var(--radius-panel)] bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)] md:flex md:h-full md:flex-col"
     >
-      <div className="mb-2 grid grid-cols-7 gap-1">
+      <div className="mb-3 hidden flex-none items-center justify-between gap-2 md:flex">
+        <p
+          className="font-bold"
+          style={{ fontFamily: "var(--font-display)", fontSize: "var(--card-title-size)" }}
+        >
+          {monthTitleText}
+        </p>
+        <div className="flex flex-none items-center gap-1.5">
+          <NavButton label="Previous month" onClick={onPrevMonth}>
+            &lsaquo;
+          </NavButton>
+          <button
+            type="button"
+            onClick={onToday}
+            className="cursor-pointer rounded-[var(--radius-control)] bg-[var(--color-accent)] px-3 py-1.5 text-[0.66rem] font-extrabold tracking-wide text-[var(--color-accent-ink)] uppercase"
+          >
+            Today
+          </button>
+          <NavButton label="Next month" onClick={onNextMonth}>
+            &rsaquo;
+          </NavButton>
+        </div>
+      </div>
+      <div className="mb-2 grid flex-none grid-cols-7 gap-1">
         {WEEKDAY_LABELS.map((label) => (
           <div
             key={label}
@@ -88,7 +157,14 @@ export function MonthGrid({
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-7 gap-1">
+      {/* md+ (tablet, ARCHITECTURE.md §4): this is the primary "glance and
+          see the month" element, so its rows grow via md:auto-rows-fr to
+          fill whatever vertical space the tablet layout gives this column
+          — day cells drop their aspect-square cap (md:aspect-auto) and
+          stretch (grid's default align-items: stretch) to the larger row
+          height instead. Mobile keeps the compact, content-sized square
+          grid unchanged. */}
+      <div className="grid grid-cols-7 gap-1 md:min-h-0 md:flex-1 md:auto-rows-fr">
         {days.map((day) => {
           const key = dateKey(day);
           const inMonth = isSameMonth(day, monthAnchor);
@@ -117,7 +193,7 @@ export function MonthGrid({
               aria-pressed={selected}
               aria-label={`${format(day, "EEEE, MMMM d")}${hasEvent ? `, ${dayEvents.length} event${dayEvents.length > 1 ? "s" : ""} (${namesForLabel})` : ", nothing scheduled"}`}
               className={cx(
-                "relative aspect-square rounded-lg pt-1.5 text-center transition-colors",
+                "relative aspect-square rounded-lg pt-1.5 text-center transition-colors md:aspect-auto md:pt-2.5",
                 inMonth ? "text-[var(--color-ink)]" : "font-normal text-[var(--color-ink-faint)] opacity-55",
                 today && "bg-[var(--color-accent)] text-[var(--color-accent-ink)]",
                 selected &&
@@ -133,13 +209,17 @@ export function MonthGrid({
               {hasEvent && (
                 <span
                   aria-hidden="true"
-                  className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 gap-[3px]"
+                  className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 items-center gap-1"
                 >
                   {dotEntries.map(({ key: dotKey, color }) => (
                     <span
                       key={dotKey}
-                      className={cx("h-1 w-1 rounded-full", pulsingDotKeys?.has(dotKey) && "imminent-dot")}
-                      style={{ backgroundColor: color }}
+                      className={cx("flex-none rounded-full", pulsingDotKeys?.has(dotKey) && "imminent-dot")}
+                      style={{
+                        backgroundColor: color,
+                        width: dotSizeVar(dotEntries.length),
+                        height: dotSizeVar(dotEntries.length),
+                      }}
                     />
                   ))}
                 </span>

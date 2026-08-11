@@ -22,6 +22,26 @@ export default defineConfig({
     baseURL: `http://localhost:${FRONTEND_PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // Pre-seed the one-time "Enable notifications" prompt (App.tsx,
+    // ARCHITECTURE.md §8a) as already-dismissed for every test. It's a
+    // real fixed-position UI element (md+: a dismissible modal with a
+    // full-screen backdrop, by design — see NotificationPrompt.tsx) that
+    // would otherwise cover the screen on every single test's first-ever
+    // page load (each test gets fresh browser storage), blocking
+    // interaction with everything underneath. No spec in this suite
+    // exercises the prompt itself, so this just keeps ~70 unrelated tests
+    // from having to dismiss it first — matches a real device days after
+    // first launch far better than a perpetually-fresh browser would
+    // anyway.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: `http://localhost:${FRONTEND_PORT}`,
+          localStorage: [{ name: "our-calendar:notif-prompt-seen", value: "1" }],
+        },
+      ],
+    },
   },
   projects: [
     {

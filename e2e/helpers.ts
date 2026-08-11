@@ -157,6 +157,32 @@ export function todoRow(page: Page, text: string) {
   return page.getByRole("checkbox", { name: text, exact: true });
 }
 
+/**
+ * Swipe-to-reveal (this pass): event/todo rows now hide their Edit/Delete
+ * buttons behind a swipe-right gesture (SwipeRevealRow.tsx) instead of an
+ * always-visible delete X. `row` should be the `<li data-swipe-row-id>`
+ * wrapper (e.g. `panel.locator("li", { hasText: title })` for events,
+ * `page.locator("li", { has: todoRow(page, text) })` for todos) — real
+ * mouse-drag simulation past the open threshold, snapping the row open so
+ * its revealed "Edit"/"Delete" buttons become clickable.
+ */
+export async function swipeRowOpen(page: Page, row: import("@playwright/test").Locator) {
+  // Cards are now compact (Day List/To-Do each ~25% of the tablet screen by
+  // default), so a freshly-added row is routinely scrolled out of view
+  // within the card's own overflow-y-auto list — unlike locator.click(),
+  // raw page.mouse coordinates don't auto-scroll, so this must do it
+  // explicitly before reading a bounding box to drag from.
+  await row.scrollIntoViewIfNeeded();
+  const box = await row.boundingBox();
+  if (!box) throw new Error("swipeRowOpen: row has no bounding box (not visible?)");
+  const startX = box.x + Math.min(40, box.width / 4);
+  const y = box.y + box.height / 2;
+  await page.mouse.move(startX, y);
+  await page.mouse.down();
+  await page.mouse.move(startX + 170, y, { steps: 12 });
+  await page.mouse.up();
+}
+
 /** Opens the (already-open) add/edit event sheet's Repeats dropdown and
  * clicks the option whose visible label matches `labelPattern` — labels are
  * computed relative to the event's anchor day (e.g. "Weekly on Thursday"),

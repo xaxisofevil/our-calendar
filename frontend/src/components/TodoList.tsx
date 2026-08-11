@@ -1,8 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import type { TodoRecord } from "../types";
 import { cx } from "../lib/cx";
-import { DeleteButton } from "./DeleteButton";
+import { PanelExpandButton } from "./PanelExpandButton";
+import { SwipeRevealRow } from "./SwipeRevealRow";
+
+export interface TodoEditInput {
+  text: string;
+  notes: string | null;
+  dueAt: string | null;
+}
 
 interface TodoListProps {
   todos: TodoRecord[];
@@ -12,6 +19,13 @@ interface TodoListProps {
   onAdd: (text: string, notes: string | null, dueDate: string | null) => void;
   onToggle: (id: number, completed: boolean) => void;
   onDelete: (id: number) => void;
+  /** New (this pass): the first "edit an existing todo" flow — a
+   * lightweight inline form (same spirit as quick-add's own optional-details
+   * fields), reached via the swipe-revealed Edit button. */
+  onEdit: (id: number, input: TodoEditInput) => void;
+  // Tablet card header (this pass) — To-Do's own expand button.
+  expanded?: boolean;
+  onToggleExpand?: () => void;
 }
 
 const HIDE_COMPLETED_KEY = "our-calendar:hide-completed-todos";
@@ -71,13 +85,113 @@ function isOverdue(dueDate: string): boolean {
   return parseDueDate(dueDate) < today;
 }
 
-export function TodoList({ todos, addError, onAdd, onToggle, onDelete }: TodoListProps) {
+/** New (this pass, item 5): lightweight inline edit form, pre-filled from
+ * the todo's current text/notes/due date — same shape as quick-add's own
+ * optional-details fields, deliberately not a heavier modal system. */
+function TodoEditForm({
+  todo,
+  onSave,
+  onCancel,
+}: {
+  todo: TodoRecord;
+  onSave: (input: TodoEditInput) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(todo.text);
+  const [notes, setNotes] = useState(todo.notes ?? "");
+  const [dueDate, setDueDate] = useState(todo.dueAt ?? "");
+
+  function save() {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    onSave({ text: trimmed, notes: notes.trim() ? notes.trim() : null, dueAt: dueDate || null });
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-[var(--color-accent)] bg-[var(--color-bg)] p-2.5">
+      <label className="flex flex-col gap-1">
+        <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">Text</span>
+        <input
+          value={text}
+          autoFocus
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+            }
+            if (e.key === "Escape") onCancel();
+          }}
+          aria-label={`Edit text for ${todo.text}`}
+          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">Notes (optional)</span>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          aria-label={`Edit notes for ${todo.text}`}
+          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs leading-relaxed outline-none"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">Due date (optional)</span>
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          aria-label={`Edit due date for ${todo.text}`}
+          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs outline-none"
+        />
+      </label>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label={`Cancel editing ${todo.text}`}
+          className="cursor-pointer rounded-full border border-[var(--color-line)] px-3 py-1.5 text-xs font-bold text-[var(--color-ink-soft)]"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          aria-label={`Save changes to ${todo.text}`}
+          className="cursor-pointer rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-bold text-[var(--color-accent-ink)]"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, expanded, onToggleExpand }: TodoListProps) {
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [hideCompleted, setHideCompleted] = useState(readHideCompleted);
+  const [openSwipeId, setOpenSwipeId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  // Item 4/5: tapping outside the currently-open swipe reveal (another row,
+  // or anywhere else in/outside the list) closes it — same pattern as
+  // DayDetailPanel's event rows.
+  useEffect(() => {
+    if (openSwipeId == null) return;
+    function handlePointerDown(e: PointerEvent) {
+      const target = e.target as HTMLElement | null;
+      const rowEl = target?.closest("[data-swipe-row-id]");
+      const rowId = rowEl?.getAttribute("data-swipe-row-id");
+      if (rowId !== String(openSwipeId)) setOpenSwipeId(null);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [openSwipeId]);
 
   function updateHideCompleted(next: boolean) {
     setHideCompleted(next);
@@ -125,28 +239,21 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete }: TodoLis
   return (
     <section
       aria-label="Household to-do list"
-      className="rounded-[var(--radius-panel)] bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)]"
+      className="rounded-[var(--radius-panel)] bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)] md:flex md:h-full md:flex-col"
     >
-      <div className="mb-2.5 flex items-start justify-between gap-2">
+      <div className="mb-2.5 flex flex-none items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-bold" style={{ fontFamily: "var(--font-display)" }}>
-            Household
+          <p className="font-bold" style={{ fontFamily: "var(--font-display)", fontSize: "var(--card-title-size)" }}>
+            To-Do
           </p>
           <p className="text-[0.66rem] text-[var(--color-ink-faint)]">Shared list — not tied to any date</p>
         </div>
-        <label className="flex flex-none items-center gap-1.5">
-          <span className="text-[0.62rem] font-semibold text-[var(--color-ink-faint)]">Hide completed</span>
-          <input
-            type="checkbox"
-            className="toggle-switch"
-            checked={hideCompleted}
-            onChange={(e) => updateHideCompleted(e.target.checked)}
-            aria-label="Hide completed items"
-          />
-        </label>
+        {onToggleExpand && (
+          <PanelExpandButton expanded={expanded ?? false} onClick={onToggleExpand} label="To-Do" className="hidden md:grid" />
+        )}
       </div>
 
-      <div className="mb-3 flex flex-col gap-1.5">
+      <div className="mb-3 flex flex-none flex-col gap-1.5">
         <div className="flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3">
           <input
             value={text}
@@ -211,71 +318,123 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete }: TodoLis
         )}
       </div>
 
-      <ul className="flex flex-col gap-1.5">
+      <ul className="flex flex-col gap-1.5 md:min-h-0 md:flex-1 md:overflow-y-auto">
         {sortedTodos.map((todo) => {
           const dueDateValue = todo.dueAt;
           const overdue = dueDateValue ? !todo.completed && isOverdue(dueDateValue) : false;
+
+          if (editingId === todo.id) {
+            return (
+              <li key={todo.id}>
+                <TodoEditForm
+                  todo={todo}
+                  onCancel={() => setEditingId(null)}
+                  onSave={(input) => {
+                    onEdit(todo.id, input);
+                    setEditingId(null);
+                  }}
+                />
+              </li>
+            );
+          }
+
           return (
-            <li key={todo.id}>
-              <div className="flex items-center gap-2.5 text-sm">
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={todo.completed}
-                  aria-label={todo.text}
-                  onClick={() => onToggle(todo.id, !todo.completed)}
-                  className={cx(
-                    "grid h-[19px] w-[19px] flex-none cursor-pointer place-items-center rounded-md border-2 text-[var(--color-accent-ink)]",
-                    todo.completed
-                      ? "border-[var(--color-good)] bg-[var(--color-good)]"
-                      : "border-[var(--color-line)] bg-transparent",
-                  )}
-                >
-                  {todo.completed && <CheckIcon />}
-                </button>
-                <span
-                  className={cx(
-                    "flex-1 truncate",
-                    todo.completed && "text-[var(--color-ink-soft)] line-through decoration-[var(--color-line)]",
-                  )}
-                >
-                  {todo.text}
-                </span>
-                {todo.notes && (
-                  <button
-                    type="button"
-                    onClick={() => toggleExpanded(todo.id)}
-                    aria-label={expandedIds.has(todo.id) ? "Hide notes" : "Show notes"}
-                    aria-expanded={expandedIds.has(todo.id)}
-                    className={cx(
-                      "flex-none cursor-pointer",
-                      expandedIds.has(todo.id) ? "text-[var(--color-accent)]" : "text-[var(--color-ink-faint)]",
-                    )}
-                  >
-                    <NoteIcon />
-                  </button>
-                )}
-                <DeleteButton label={`Delete ${todo.text}`} onClick={() => onDelete(todo.id)} />
-              </div>
-              {((todo.notes && expandedIds.has(todo.id)) || dueDateValue) && (
-                <div className="mt-1 flex flex-col gap-0.5 pl-[27px]">
-                  {dueDateValue && (
-                    <span
+            <li key={todo.id} data-swipe-row-id={todo.id}>
+              <SwipeRevealRow
+                isOpen={openSwipeId === todo.id}
+                onOpenChange={(open) => setOpenSwipeId(open ? todo.id : null)}
+                onTap={() => {}}
+                ariaLabel={`${todo.text} row`}
+                actions={
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenSwipeId(null);
+                        setEditingId(todo.id);
+                      }}
+                      aria-label={`Edit ${todo.text}`}
+                      className="flex-1 cursor-pointer rounded-md bg-[var(--color-line)] text-xs font-bold text-[var(--color-ink-soft)]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenSwipeId(null);
+                        onDelete(todo.id);
+                      }}
+                      aria-label={`Delete ${todo.text}`}
+                      className="flex-1 cursor-pointer rounded-md bg-[var(--color-accent)]/15 text-xs font-bold text-[var(--color-accent)]"
+                    >
+                      Delete
+                    </button>
+                  </>
+                }
+              >
+                <div className="bg-[var(--color-surface)] py-0.5">
+                  <div className="flex items-center gap-2.5 text-sm">
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={todo.completed}
+                      aria-label={todo.text}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => onToggle(todo.id, !todo.completed)}
                       className={cx(
-                        "flex w-fit items-center gap-1 text-[0.68rem] font-semibold",
-                        overdue ? "text-[var(--color-accent)]" : "text-[var(--color-ink-faint)]",
+                        "grid h-[19px] w-[19px] flex-none cursor-pointer place-items-center rounded-md border-2 text-[var(--color-accent-ink)]",
+                        todo.completed
+                          ? "border-[var(--color-good)] bg-[var(--color-good)]"
+                          : "border-[var(--color-line)] bg-transparent",
                       )}
                     >
-                      <CalendarIcon />
-                      Due {format(parseDueDate(dueDateValue), "EEE, MMM d")}
-                      {overdue && " · overdue"}
+                      {todo.completed && <CheckIcon />}
+                    </button>
+                    <span
+                      className={cx(
+                        "flex-1 truncate",
+                        todo.completed && "text-[var(--color-ink-soft)] line-through decoration-[var(--color-line)]",
+                      )}
+                    >
+                      {todo.text}
                     </span>
-                  )}
-                  {todo.notes && expandedIds.has(todo.id) && (
-                    <p className="text-xs leading-relaxed text-[var(--color-ink-soft)]">{todo.notes}</p>
+                    {todo.notes && (
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => toggleExpanded(todo.id)}
+                        aria-label={expandedIds.has(todo.id) ? "Hide notes" : "Show notes"}
+                        aria-expanded={expandedIds.has(todo.id)}
+                        className={cx(
+                          "flex-none cursor-pointer",
+                          expandedIds.has(todo.id) ? "text-[var(--color-accent)]" : "text-[var(--color-ink-faint)]",
+                        )}
+                      >
+                        <NoteIcon />
+                      </button>
+                    )}
+                  </div>
+                  {((todo.notes && expandedIds.has(todo.id)) || dueDateValue) && (
+                    <div className="mt-1 flex flex-col gap-0.5 pl-[27px]">
+                      {dueDateValue && (
+                        <span
+                          className={cx(
+                            "flex w-fit items-center gap-1 text-[0.68rem] font-semibold",
+                            overdue ? "text-[var(--color-accent)]" : "text-[var(--color-ink-faint)]",
+                          )}
+                        >
+                          <CalendarIcon />
+                          Due {format(parseDueDate(dueDateValue), "EEE, MMM d")}
+                          {overdue && " · overdue"}
+                        </span>
+                      )}
+                      {todo.notes && expandedIds.has(todo.id) && (
+                        <p className="text-xs leading-relaxed text-[var(--color-ink-soft)]">{todo.notes}</p>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
+              </SwipeRevealRow>
             </li>
           );
         })}
@@ -287,15 +446,19 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete }: TodoLis
         )}
       </ul>
 
-      {hideCompleted && hiddenCount > 0 && (
+      {/* Item 3, moved (direct feedback): the consolidated hide-completed
+          control now lives as a footer below the list, not in the header
+          row next to the expand button. Still one control, two
+          labels/states, same underlying `hideCompleted` boolean. */}
+      <div className="mt-2 flex flex-none justify-end">
         <button
           type="button"
-          onClick={() => updateHideCompleted(false)}
-          className="mt-2 cursor-pointer text-[0.68rem] font-semibold text-[var(--color-ink-faint)] underline decoration-dotted underline-offset-2"
+          onClick={() => updateHideCompleted(!hideCompleted)}
+          className="cursor-pointer text-[0.68rem] font-semibold text-[var(--color-ink-faint)] underline decoration-dotted underline-offset-2"
         >
-          {hiddenCount} completed hidden — show
+          {hideCompleted ? `${hiddenCount} completed hidden — show` : "Hide completed"}
         </button>
-      )}
+      </div>
     </section>
   );
 }

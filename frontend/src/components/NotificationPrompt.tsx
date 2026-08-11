@@ -30,51 +30,85 @@ function BellIcon() {
  * this batch is approved (M5, gated on M4's installed-PWA service worker
  * per the doc).
  */
-export function NotificationPrompt({ open, onDismiss }: NotificationPromptProps) {
+function PromptCard({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div
-      role="dialog"
-      aria-live="polite"
-      aria-label="Enable notifications"
-      className={cx(
-        // Deliberately below the day-detail sheet (z-40) and add-event
-        // overlay (z-50): opening either should visually supersede this
-        // lightweight nudge, not fight it for taps, on iPhone width.
-        "fixed inset-x-4 bottom-4 z-30 transition-all duration-300 ease-out md:right-6 md:bottom-6 md:left-auto md:w-80",
-        open ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
-      )}
-    >
-      <div className="flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[var(--color-line)] bg-[var(--color-surface)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.08),0_18px_36px_-18px_rgba(0,0,0,0.45)]">
-        <div className="flex items-start gap-2.5">
-          <span className="grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--color-accent)] text-[var(--color-accent-ink)]">
-            <BellIcon />
-          </span>
-          <div>
-            <p className="text-sm font-bold" style={{ fontFamily: "var(--font-display)" }}>
-              Stay in the loop
-            </p>
-            <p className="mt-0.5 text-xs leading-relaxed text-[var(--color-ink-soft)]">
-              Get a nudge 30 minutes before anything on the calendar — anyone's, not just yours.
-            </p>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="cursor-pointer rounded-full border border-[var(--color-line)] px-3.5 py-1.5 text-xs font-bold text-[var(--color-ink-soft)]"
-          >
-            Not now
-          </button>
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="cursor-pointer rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-bold text-[var(--color-accent-ink)]"
-          >
-            Enable notifications
-          </button>
+    <div className="flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[var(--color-line)] bg-[var(--color-surface)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.08),0_18px_36px_-18px_rgba(0,0,0,0.45)]">
+      <div className="flex items-start gap-2.5">
+        <span className="grid h-8 w-8 flex-none place-items-center rounded-full bg-[var(--color-accent)] text-[var(--color-accent-ink)]">
+          <BellIcon />
+        </span>
+        <div>
+          <p className="text-sm font-bold" style={{ fontFamily: "var(--font-display)" }}>
+            Stay in the loop
+          </p>
+          <p className="mt-0.5 text-xs leading-relaxed text-[var(--color-ink-soft)]">
+            Get a nudge 30 minutes before anything on the calendar — anyone's, not just yours.
+          </p>
         </div>
       </div>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="cursor-pointer rounded-full border border-[var(--color-line)] px-3.5 py-1.5 text-xs font-bold text-[var(--color-ink-soft)]"
+        >
+          Not now
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="cursor-pointer rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-bold text-[var(--color-accent-ink)]"
+        >
+          Enable notifications
+        </button>
+      </div>
     </div>
+  );
+}
+
+export function NotificationPrompt({ open, onDismiss }: NotificationPromptProps) {
+  return (
+    <>
+      {/* Mobile (<md): unchanged from before this pass — a lightweight,
+          non-blocking corner toast (no backdrop), since the rest of the
+          page is a normal scrollable document there, nothing competes with
+          it for the corner. */}
+      <div
+        role="dialog"
+        aria-live="polite"
+        aria-label="Enable notifications"
+        className={cx(
+          // Deliberately below the day-detail sheet (z-40) and add-event
+          // overlay (z-50): opening either should visually supersede this
+          // lightweight nudge, not fight it for taps.
+          "fixed inset-x-4 bottom-4 z-30 transition-all duration-300 ease-out md:hidden",
+          open ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
+        )}
+      >
+        <PromptCard onDismiss={onDismiss} />
+      </div>
+
+      {/* Tablet (md+): a real dismissible modal (backdrop + centered card),
+          not a floating corner toast — this pass's redesign fills the
+          screen edge-to-edge with three always-interactive cards (Calendar
+          / Day List / To-Do), so there's no longer a "dead" corner a toast
+          could float over without sitting on top of real controls (Edit/
+          Delete/Show-notes, expand buttons, day cells). A backdrop makes it
+          unambiguous and keeps stray taps from landing on whatever's
+          underneath while it's up. */}
+      {open && (
+        <div
+          className="fixed inset-0 z-30 hidden items-center justify-center bg-black/30 p-6 md:flex"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) onDismiss();
+          }}
+        >
+          <div className="w-full max-w-sm">
+            <PromptCard onDismiss={onDismiss} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }

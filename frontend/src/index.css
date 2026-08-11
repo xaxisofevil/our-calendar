@@ -41,31 +41,43 @@ body {
    Uses the active skin's own --color-pulse/--color-pulse-tint tokens
    (tokens.css), fading toward the background — never a hardcoded color.
    Scope is deliberately narrow: only MonthGrid's per-day dot and
-   DayDetailPanel's own event row ever get these classes. */
+   DayDetailPanel's own event row ever get these classes.
+
+   Louder pass (direct feedback: the original pulse was too subtle to catch
+   at a glance): bigger opacity/lightness swing, a soft box-shadow bloom
+   around the dot, and a faster cycle (2.4s → 1.6s). Still entirely driven
+   by the skin's own accent-derived tokens (never a literal red), and still
+   fully neutralized by the prefers-reduced-motion block above (which wins
+   via !important + source order, so this louder version inherits the same
+   accessibility fallback for free). */
 @keyframes imminent-pulse-dot {
   0%,
   100% {
     background-color: var(--color-pulse);
+    box-shadow: 0 0 0 0 var(--color-pulse-tint);
   }
   50% {
     background-color: var(--color-bg);
+    box-shadow: 0 0 0 5px var(--color-pulse-tint);
   }
 }
 .imminent-dot {
-  animation: imminent-pulse-dot 2.4s ease-in-out infinite;
+  animation: imminent-pulse-dot 1.6s ease-in-out infinite;
 }
 
 @keyframes imminent-pulse-row {
   0%,
   100% {
     background-color: var(--color-bg);
+    box-shadow: inset 0 0 0 1px transparent;
   }
   50% {
     background-color: var(--color-pulse-tint);
+    box-shadow: inset 0 0 0 1px var(--color-pulse);
   }
 }
 .imminent-row {
-  animation: imminent-pulse-row 2.4s ease-in-out infinite;
+  animation: imminent-pulse-row 1.6s ease-in-out infinite;
 }
 
 /* Custom checkbox-as-switch for the add-event "All day" toggle. Kept as a
@@ -101,4 +113,37 @@ body {
 }
 .toggle-switch:checked::after {
   transform: translateX(17px);
+}
+
+/* Tablet (md+) layout: Calendar occupies the left half of the screen (full
+   height); Day List and To-Do split the right half evenly (top/bottom) —
+   default proportions are Calendar 50% of the screen, Day List/To-Do 25%
+   each (50% width × 50% height of the right column). Named grid areas
+   (rather than nested flex wrappers) so App.tsx can keep MonthGrid/
+   DayDetailPanel/TodoList as plain, order-independent children of <main> —
+   the same single instances mobile already uses in normal document flow
+   (single-column stack, this rule doesn't apply below md), just relocated
+   on screen via CSS, no DOM restructuring needed between breakpoints.
+
+   This layout is intentionally static — expanding a card (see
+   PanelExpandButton/ExpandedPanelModal) does not resize these tracks; it
+   opens a separate modal overlay instead, so there's exactly one grid
+   shape to reason about here. */
+@media (min-width: 768px) {
+  .tablet-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    grid-template-areas:
+      "calendar daylist"
+      "calendar todo";
+  }
+  .tablet-area-calendar {
+    grid-area: calendar;
+  }
+  .tablet-area-daylist {
+    grid-area: daylist;
+  }
+  .tablet-area-todo {
+    grid-area: todo;
+  }
 }

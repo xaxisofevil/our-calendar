@@ -7,6 +7,7 @@ import {
   saveEventForm,
   selectDay,
   selectRepeatOption,
+  swipeRowOpen,
   toDateInputValue,
 } from "./helpers";
 
@@ -105,6 +106,7 @@ test.describe("Recurring events", () => {
 
     await selectDay(page, anchor);
     const panel = page.locator('section[aria-label="Selected day"]');
+    await swipeRowOpen(page, panel.locator("li", { hasText: "Trash day reminder" }));
     await panel.getByRole("button", { name: "Delete Trash day reminder" }).click();
     await expect(panel.getByText("Trash day reminder")).toHaveCount(0);
 
