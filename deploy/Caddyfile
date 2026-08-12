@@ -30,6 +30,26 @@ ericb.duckdns.org:8443 {
 		root * C:/Users/ericm/projects/our-calendar/frontend/dist
 		try_files {path} /index.html
 		file_server
+
+		# Vite's own /assets/* (JS/CSS) are content-hashed in their filename
+		# (e.g. index-CcNxZBD-.js) — safe to cache aggressively/forever,
+		# since any content change produces a brand-new URL.
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+		# Everything else served here (icons/, manifest.json, index.html,
+		# sw.js, favicon.svg) keeps the SAME filename even when its content
+		# changes — e.g. replacing an icon PNG in place. Without an explicit
+		# header, browsers apply their own heuristic freshness lifetime and
+		# can keep serving old bytes for a surprisingly long time under the
+		# same URL (this happened for real: an icon update didn't show up
+		# on an installed PWA until this was added). `no-cache` still lets
+		# the browser cache the file, but forces an ETag revalidation
+		# request every time — cheap on a home connection, and the
+		# service-worker file specifically *must* never be aggressively
+		# cached or its own update mechanism breaks.
+		@revalidate path /icons/* /manifest.json /index.html /sw.js /registerSW.js /favicon.svg
+		header @revalidate Cache-Control "no-cache"
 	}
 
 	encode gzip
