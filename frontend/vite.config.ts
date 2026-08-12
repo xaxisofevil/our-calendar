@@ -9,6 +9,29 @@ import { VitePWA } from 'vite-plugin-pwa'
 // dev/prod one — defaults to 3001 so plain `npm run dev` is unaffected.
 const backendPort = process.env.BACKEND_PORT || '3001'
 
+// Real incident, found via direct report: a production build was run from a
+// shell whose process predated a User-level env var being set (Windows
+// doesn't propagate newly-set persistent env vars to already-running
+// processes), so `npm run build` silently produced a bundle with
+// VITE_VAPID_PUBLIC_KEY missing. Vite bakes VITE_-prefixed vars in at build
+// time with no built-in warning if one is absent, so that shipped straight
+// to production: enablePushNotifications() (frontend/src/lib/push.ts)
+// returns "unsupported" immediately whenever the key is falsy, meaning
+// Notification.requestPermission() is never even called — every device
+// silently got zero permission prompt, with no error anywhere to notice.
+// Fail loud and immediate instead, but only for `vite build` (a real
+// deploy) — `vite dev`/`vite preview` and the e2e harness (playwright.config.ts
+// sets this explicitly via its own throwaway VAPID keypair) legitimately
+// don't always need it.
+if (process.env.npm_lifecycle_event === 'build' && !process.env.VITE_VAPID_PUBLIC_KEY) {
+  throw new Error(
+    'VITE_VAPID_PUBLIC_KEY is not set in this shell — a production build would silently ' +
+      'ship with push notifications broken (see this comment in vite.config.ts). Set it ' +
+      '(it is a User-level env var on the deploy machine; a fresh shell/process may not have ' +
+      'inherited it) and re-run the build.',
+  )
+}
+
 // ARCHITECTURE.md §4 "PWA": vite-plugin-pwa (Workbox) generates the
 // manifest + service worker. The service worker caches the **app shell
 // only** (JS/CSS/icons, via the injected precache manifest below) —
