@@ -86,8 +86,13 @@ sqlite.exec(`
 
   -- ARCHITECTURE.md §8a/§11/§12 (M5) — dedup log so the reminder scanner
   -- (lib/reminders.ts) never double-sends for the same occurrence.
+  -- ON DELETE CASCADE: without it, deleting an event that's already had a
+  -- reminder sent for it (i.e. any past/already-notified event) fails with
+  -- a foreign-key-constraint error — a real bug, found via direct report,
+  -- fixed here and via ensureCascadeDelete's migration below for databases
+  -- created before this line existed.
   CREATE TABLE IF NOT EXISTS sent_reminders (
-    event_id             INTEGER NOT NULL REFERENCES events(id),
+    event_id             INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     occurrence_start_at  TEXT NOT NULL,
     sent_at              TEXT NOT NULL,
     PRIMARY KEY (event_id, occurrence_start_at)
@@ -108,6 +113,41 @@ ensureColumn("todos", "notes", "notes TEXT");
 ensureColumn("todos", "due_at", "due_at TEXT");
 ensureColumn("events", "person_id", "person_id INTEGER REFERENCES people(id)");
 ensureColumn("events", "recurrence_rule", "recurrence_rule TEXT");
+
+// Real bug, found via direct report: a database created before
+// `sent_reminders`'s REFERENCES gained ON DELETE CASCADE (above) has that
+// constraint baked in as SQLite's default NO ACTION — meaning any event
+// that's already had a reminder sent for it (i.e. any past/already-
+// notified event) can never be deleted, since doing so would leave its
+// sent_reminders row pointing at a nonexistent event. SQLite has no
+// `ALTER TABLE ... ALTER CONSTRAINT`, so fixing an existing table means
+// rebuilding it: create a correctly-constrained replacement, copy every
+// row over unchanged, drop the old one, rename the new one into place.
+// Existing sent_reminders data (including rows referencing events that
+// still exist) is fully preserved — only the constraint changes.
+function ensureCascadeDelete(table: string, column: string) {
+  const foreignKeys = sqlite.prepare(`PRAGMA foreign_key_list(${table})`).all() as Array<{
+    from: string;
+    on_delete: string;
+  }>;
+  const fk = foreignKeys.find((f) => f.from === column);
+  if (fk?.on_delete === "CASCADE") return; // already correct — fresh DB, or already migrated
+
+  sqlite.pragma("foreign_keys = OFF");
+  sqlite.exec(`
+    CREATE TABLE sent_reminders_new (
+      event_id             INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      occurrence_start_at  TEXT NOT NULL,
+      sent_at              TEXT NOT NULL,
+      PRIMARY KEY (event_id, occurrence_start_at)
+    );
+    INSERT INTO sent_reminders_new SELECT * FROM sent_reminders;
+    DROP TABLE sent_reminders;
+    ALTER TABLE sent_reminders_new RENAME TO sent_reminders;
+  `);
+  sqlite.pragma("foreign_keys = ON");
+}
+ensureCascadeDelete("sent_reminders", "event_id");
 
 export const db = drizzle(sqlite, { schema });
 export { sqlite };

@@ -106,6 +106,38 @@ test.describe("Push reminder scan", () => {
     await page.request.delete("/api/push/subscribe", { data: { endpoint } });
   });
 
+  // Regression test for a real bug found via direct user report: "can't
+  // delete events from the past" (ones with no sent_reminders row deleted
+  // fine; ones that had already been reminded about failed). Root cause was
+  // sent_reminders.event_id lacking ON DELETE CASCADE, so deleting an event
+  // that already had a sent_reminders row failed with a foreign-key-
+  // constraint error. See db/client.ts's ensureCascadeDelete.
+  test("an event that has already had a reminder sent for it can still be deleted", async ({ page }) => {
+    const endpoint = `https://example.com/fake-endpoint-delete-${Date.now()}`;
+    await page.request.post("/api/push/subscribe", {
+      data: { endpoint, keys: { p256dh: "fake-p256dh-key-value", auth: "fake-auth-secret" } },
+    });
+
+    const startAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    const endAtIso = new Date(Date.now() + 35 * 60_000).toISOString();
+    const eventRes = await page.request.post("/api/events", {
+      data: { title: `Push reminder delete test ${Date.now()}`, startAt, endAt: endAtIso, allDay: false },
+    });
+    expect(eventRes.status()).toBe(201);
+    const event = await eventRes.json();
+
+    // Wait for the reminder scanner to actually record a sent_reminders row
+    // referencing this event — this is the state that used to make deletion
+    // impossible.
+    await waitForSentReminder(event.id, startAt);
+    expect(countSentReminders(event.id, startAt)).toBe(1);
+
+    const deleteRes = await page.request.delete(`/api/events/${event.id}`);
+    expect(deleteRes.status()).toBe(204);
+
+    await page.request.delete("/api/push/subscribe", { data: { endpoint } });
+  });
+
   test("an occurrence outside the lead window is not recorded", async ({ page }) => {
     const startAt = new Date(Date.now() + 90 * 60_000).toISOString(); // 90 min out — outside the 30-min window
     const endAtIso = new Date(Date.now() + 120 * 60_000).toISOString();

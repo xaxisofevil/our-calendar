@@ -459,8 +459,21 @@ CREATE TABLE push_subscriptions (
 
 -- §8a: dedup log so a recurring event's Nth occurrence only ever notifies
 -- once, without needing occurrences to exist as real rows anywhere
+--
+-- ON DELETE CASCADE: real bug, found via direct report — "can't delete
+-- events from the past, but future ones work". Root cause: this FK
+-- originally had no ON DELETE CASCADE, so deleting an event that already
+-- had a reminder sent for it (i.e. anything already past/notified) failed
+-- with a foreign-key-constraint error, since the delete would've left its
+-- sent_reminders row pointing at a nonexistent event. Fixed here (fresh
+-- installs) and via client.ts's ensureCascadeDelete migration (existing
+-- databases — SQLite has no ALTER TABLE ... ALTER CONSTRAINT, so it
+-- rebuilds the table: create a correctly-constrained replacement, copy
+-- every row over unchanged, drop the old one, rename the new one into
+-- place). Regression test: e2e/push-notifications.spec.ts's "an event that
+-- has already had a reminder sent for it can still be deleted".
 CREATE TABLE sent_reminders (
-  event_id           INTEGER NOT NULL REFERENCES events(id),
+  event_id           INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   occurrence_start_at TEXT NOT NULL,   -- ISO 8601; same value for non-recurring events
   sent_at            TEXT NOT NULL,
   PRIMARY KEY (event_id, occurrence_start_at)
