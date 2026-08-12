@@ -6,15 +6,30 @@ tablet/iPhone layouts), M2 (SSE live-sync for events/todos, recurring
 events wired to real RRULE persistence + read-time expansion, todo due
 dates + overdue sort-to-top wired to a real `due_at` column, the three
 validation/error-surfacing bug fixes, delete-affordance and event-editing),
-and M4 (`pwa.spec.ts` — manifest.json served with the right installability
+M4 (`pwa.spec.ts` — manifest.json served with the right installability
 fields/icons, service worker registration, app-shell-only caching with no
 `/api/` entries ever landing in `CacheStorage`, and the "can't reach
 server" state when `/api/*` is unreachable — see ARCHITECTURE.md §4's "PWA
-implementation" subsection for the full design). The hide-completed-todos
-toggle and notification opt-in are still UI-only per ARCHITECTURE.md's M2
-scope (no backend persistence for either is planned/needed — hide-completed
-is deliberately per-device localStorage, and the notification prompt is a
-pre-permission explainer only, real Web Push wiring is M5).
+implementation" subsection for the full design, including the M5 switch
+from `generateSW` to `injectManifest`), and M5 (`push-notifications.spec.ts`
+— `POST`/`DELETE /api/push/subscribe` persistence/validation/upsert/
+idempotent-delete, the in-process reminder-scan interval finding a
+qualifying occurrence and recording it in `sent_reminders` exactly once
+across multiple ticks, an out-of-window occurrence correctly never
+recorded, and the real "Enable notifications" UI flow with the browser's
+`Notification`/`PushManager` APIs mocked — see ARCHITECTURE.md §8a's
+"Implementation (M5 — done)" subsection). The hide-completed-todos toggle
+is still UI-only per ARCHITECTURE.md's M2 scope (deliberately per-device
+localStorage, no backend persistence planned/needed).
+
+`push-notifications.spec.ts` runs against a throwaway VAPID keypair and a
+sped-up `REMINDER_SCAN_INTERVAL_MS`, configured only for the isolated e2e
+backend (see `e2e/helpers.ts`) — never the real household VAPID keys, which
+live in a real, gitignored `backend/.env` this suite never reads. Since
+`push_subscriptions`/`sent_reminders` have no REST read endpoint (§12
+deliberately doesn't expose one), assertions on their contents read the
+isolated e2e SQLite file directly (`e2e/db.ts`, read-only) rather than the
+real dev/prod database.
 
 ## Running
 

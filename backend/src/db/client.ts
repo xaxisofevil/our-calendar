@@ -72,6 +72,26 @@ sqlite.exec(`
     created_at    TEXT NOT NULL,
     last_seen_at  TEXT NOT NULL
   );
+
+  -- ARCHITECTURE.md §8a/§11/§12 (M5) — one row per opted-in device's Web
+  -- Push subscription.
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id            INTEGER PRIMARY KEY,
+    endpoint      TEXT NOT NULL UNIQUE,
+    p256dh        TEXT NOT NULL,
+    auth          TEXT NOT NULL,
+    device_label  TEXT,
+    created_at    TEXT NOT NULL
+  );
+
+  -- ARCHITECTURE.md §8a/§11/§12 (M5) — dedup log so the reminder scanner
+  -- (lib/reminders.ts) never double-sends for the same occurrence.
+  CREATE TABLE IF NOT EXISTS sent_reminders (
+    event_id             INTEGER NOT NULL REFERENCES events(id),
+    occurrence_start_at  TEXT NOT NULL,
+    sent_at              TEXT NOT NULL,
+    PRIMARY KEY (event_id, occurrence_start_at)
+  );
 `);
 
 // Dev-time migration shims: if an earlier run of this app created a table

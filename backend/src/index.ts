@@ -6,7 +6,10 @@ import { peopleRouter } from "./routes/people.js";
 import { todosRouter } from "./routes/todos.js";
 import { streamRouter } from "./routes/stream.js";
 import { authRouter } from "./routes/auth.js";
+import { pushRouter } from "./routes/push.js";
 import { requireAuth } from "./middleware/requireAuth.js";
+import { scanAndSendReminders } from "./lib/reminders.js";
+import { REMINDER_SCAN_INTERVAL_MS } from "./lib/constants.js";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
@@ -21,13 +24,6 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 // there's no X-Forwarded-For to trust).
 app.set("trust proxy", 1);
 
-// Baseline security headers (X-Frame-Options, X-Content-Type-Options,
-// etc.) — near-zero config/maintenance cost, standard practice for
-// anything reachable from the internet. `contentSecurityPolicy: false`
-// because helmet's default CSP is meant for classic server-rendered pages
-// with inline-script assumptions that don't match this SPA's Vite-built
-// bundle; a hand-tuned CSP is a reasonable future addition, not required
-// for this pass.
 // Baseline security headers (X-Frame-Options, X-Content-Type-Options,
 // etc.) — near-zero config/maintenance cost, standard practice for
 // anything reachable from the internet.
@@ -83,6 +79,7 @@ app.use("/api/stream", streamRouter);
 app.use("/api/events", eventsRouter);
 app.use("/api/todos", todosRouter);
 app.use("/api/people", peopleRouter);
+app.use("/api/push", pushRouter);
 
 // Minimal error handler so a thrown/rejected handler returns JSON, not an
 // HTML stack trace, to a frontend that only ever expects JSON.
@@ -97,3 +94,16 @@ seed();
 app.listen(PORT, () => {
   console.log(`Backend listening on http://localhost:${PORT}`);
 });
+
+// ARCHITECTURE.md §8a — "a plain setInterval inside the already-running
+// backend process (every 1–2 minutes)". No cron daemon, no job queue, no
+// external scheduler. Runs once immediately on boot (rather than waiting a
+// full interval) so a reminder that's due right after a restart doesn't
+// wait unnecessarily; errors are caught per-call so one failed scan (a bad
+// webpush send, a transient DB hiccup) can't crash the interval or the
+// process — see lib/reminders.ts for the scan itself, including the
+// VAPID-not-configured no-op escape hatch.
+scanAndSendReminders().catch((err) => console.error("[push] reminder scan failed:", err));
+setInterval(() => {
+  scanAndSendReminders().catch((err) => console.error("[push] reminder scan failed:", err));
+}, REMINDER_SCAN_INTERVAL_MS);

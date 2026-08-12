@@ -46,21 +46,15 @@ export interface ListEventsRange {
 }
 
 /**
- * Mirrors the pre-extraction `GET /api/events` handler exactly, including
- * its comment block's reasoning (kept there — see routes/events.ts):
- * recurring master rows are expanded into occurrences at read time (§7a) via
- * lib/recurrence.ts; non-recurring rows pass straight through. Omitting
- * `range` returns unexpanded master rows, same as the original "no range
- * given" branch.
+ * Same recurrence-expansion logic `listEvents` uses (§7a), factored out to
+ * take precise `Date` bounds instead of day-granularity `YYYY-MM-DD`
+ * strings. `listEvents`'s range branch is just this with its two date
+ * strings turned into UTC day boundaries. The §8a reminder scanner
+ * (`lib/reminders.ts`) needs minute-precision bounds (its lead-time window
+ * isn't day-aligned), so it calls this directly instead — one query+expand
+ * implementation shared by both callers, not two copies of the same logic.
  */
-export function listEvents(range?: ListEventsRange): EventDTO[] {
-  if (!range) {
-    const rows = db.select().from(events).all();
-    return rows.map(serializeEvent);
-  }
-
-  const rangeStart = new Date(`${range.start}T00:00:00.000Z`);
-  const rangeEnd = new Date(`${range.end}T23:59:59.999Z`);
+export function listEventsBetween(rangeStart: Date, rangeEnd: Date): EventDTO[] {
   const startIso = rangeStart.toISOString();
   const endIso = rangeEnd.toISOString();
 
@@ -86,6 +80,25 @@ export function listEvents(range?: ListEventsRange): EventDTO[] {
   });
 
   return [...singleRows.map(serializeEvent), ...expanded].sort((a, b) => a.startAt.localeCompare(b.startAt));
+}
+
+/**
+ * Mirrors the pre-extraction `GET /api/events` handler exactly, including
+ * its comment block's reasoning (kept there — see routes/events.ts):
+ * recurring master rows are expanded into occurrences at read time (§7a) via
+ * lib/recurrence.ts; non-recurring rows pass straight through. Omitting
+ * `range` returns unexpanded master rows, same as the original "no range
+ * given" branch.
+ */
+export function listEvents(range?: ListEventsRange): EventDTO[] {
+  if (!range) {
+    const rows = db.select().from(events).all();
+    return rows.map(serializeEvent);
+  }
+
+  const rangeStart = new Date(`${range.start}T00:00:00.000Z`);
+  const rangeEnd = new Date(`${range.end}T23:59:59.999Z`);
+  return listEventsBetween(rangeStart, rangeEnd);
 }
 
 /** Validates with `createEventSchema` and throws `ActionValidationError` on failure. */

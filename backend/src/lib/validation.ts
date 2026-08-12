@@ -68,3 +68,25 @@ export const updateTodoSchema = z.object({
   list: z.string().trim().min(1).max(50).optional(),
 });
 export type UpdateTodoInput = z.infer<typeof updateTodoSchema>;
+
+// ARCHITECTURE.md §8a/§12 — POST /api/push/subscribe's body is a
+// `PushSubscription.toJSON()` object (endpoint + a `keys` object), the
+// standard shape the browser's Push API hands back from
+// `pushManager.subscribe()`. `deviceLabel` is optional/best-effort (§11).
+export const subscribePushSchema = z.object({
+  endpoint: z.string().trim().min(1).max(2000),
+  keys: z.object({
+    p256dh: z.string().trim().min(1).max(500),
+    auth: z.string().trim().min(1).max(500),
+  }),
+  deviceLabel: z.string().trim().max(100).nullable().optional(),
+});
+export type SubscribePushInput = z.infer<typeof subscribePushSchema>;
+
+// DELETE /api/push/subscribe just needs to know which subscription to
+// remove (e.g. the device uninstalled the PWA) — the same `endpoint` a
+// subscribe call registered it under.
+export const unsubscribePushSchema = z.object({
+  endpoint: z.string().trim().min(1).max(2000),
+});
+export type UnsubscribePushInput = z.infer<typeof unsubscribePushSchema>;

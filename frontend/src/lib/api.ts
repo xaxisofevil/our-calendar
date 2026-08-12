@@ -3,6 +3,8 @@ import type {
   CreateTodoInput,
   EventRecord,
   PersonRecord,
+  PushSubscriptionRecord,
+  SubscribePushInput,
   TodoRecord,
   UpdateEventInput,
   UpdateTodoInput,
@@ -74,4 +76,14 @@ export function updateTodo(id: number, input: UpdateTodoInput): Promise<TodoReco
 
 export function deleteTodo(id: number): Promise<void> {
   return request(`/api/todos/${id}`, { method: "DELETE" });
+}
+
+// ARCHITECTURE.md §8a/§12 — the whole "Enable notifications" flow's two
+// backend calls (see lib/push.ts's enablePushNotifications).
+export function subscribePush(input: SubscribePushInput): Promise<PushSubscriptionRecord> {
+  return request("/api/push/subscribe", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function unsubscribePush(endpoint: string): Promise<void> {
+  return request("/api/push/subscribe", { method: "DELETE", body: JSON.stringify({ endpoint }) });
 }

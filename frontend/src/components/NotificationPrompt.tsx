@@ -3,6 +3,10 @@ import { cx } from "../lib/cx";
 interface NotificationPromptProps {
   open: boolean;
   onDismiss: () => void;
+  /** "Enable notifications" — see App.tsx's handleEnableNotifications
+   * (wraps lib/push.ts's enablePushNotifications, then dismisses either
+   * way, same as "Not now"). */
+  onEnable: () => void;
 }
 
 function BellIcon() {
@@ -21,16 +25,15 @@ function BellIcon() {
 }
 
 /**
- * M2 UI-only mock of ARCHITECTURE.md §8a's one-time in-app nudge — the
- * *pre*-permission explainer, not the native OS prompt. Per the coordinator's
- * instruction this pass, it does not call `Notification.requestPermission()`,
- * register any Web Push subscription, or touch a service worker; both
- * buttons just dismiss it. "Enable notifications" wiring to the real
- * browser permission dialog + VAPID subscription is real infra for after
- * this batch is approved (M5, gated on M4's installed-PWA service worker
- * per the doc).
+ * ARCHITECTURE.md §8a's one-time in-app nudge — the *pre*-permission
+ * explainer, not the native OS prompt. UI shell unchanged since the M2 mock
+ * (approved then); M5 is what wires "Enable notifications" to the real
+ * `Notification.requestPermission()` → `pushManager.subscribe()` →
+ * `POST /api/push/subscribe` flow (lib/push.ts's enablePushNotifications,
+ * called by App.tsx's handleEnableNotifications). "Not now" stays a plain
+ * dismiss, unchanged.
  */
-function PromptCard({ onDismiss }: { onDismiss: () => void }) {
+function PromptCard({ onDismiss, onEnable }: { onDismiss: () => void; onEnable: () => void }) {
   return (
     <div className="flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[var(--color-line)] bg-[var(--color-surface)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.08),0_18px_36px_-18px_rgba(0,0,0,0.45)]">
       <div className="flex items-start gap-2.5">
@@ -56,7 +59,7 @@ function PromptCard({ onDismiss }: { onDismiss: () => void }) {
         </button>
         <button
           type="button"
-          onClick={onDismiss}
+          onClick={onEnable}
           className="cursor-pointer rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-bold text-[var(--color-accent-ink)]"
         >
           Enable notifications
@@ -66,7 +69,7 @@ function PromptCard({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-export function NotificationPrompt({ open, onDismiss }: NotificationPromptProps) {
+export function NotificationPrompt({ open, onDismiss, onEnable }: NotificationPromptProps) {
   return (
     <>
       {/* Mobile (<md): unchanged from before this pass — a lightweight,
@@ -89,7 +92,7 @@ export function NotificationPrompt({ open, onDismiss }: NotificationPromptProps)
           open ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
         )}
       >
-        <PromptCard onDismiss={onDismiss} />
+        <PromptCard onDismiss={onDismiss} onEnable={onEnable} />
       </div>
 
       {/* Tablet (md+): a real dismissible modal (backdrop + centered card),
@@ -109,7 +112,7 @@ export function NotificationPrompt({ open, onDismiss }: NotificationPromptProps)
           }}
         >
           <div className="w-full max-w-sm">
-            <PromptCard onDismiss={onDismiss} />
+            <PromptCard onDismiss={onDismiss} onEnable={onEnable} />
           </div>
         </div>
       )}

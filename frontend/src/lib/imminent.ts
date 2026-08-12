@@ -4,14 +4,17 @@ import type { EventRecord } from "../types";
 /**
  * ARCHITECTURE.md §8b: "imminent" reuses §8a's exact lead-time constant
  * (`NOTIFICATION_LEAD_MINUTES`, default 30) — one concept, two surfaces
- * (this pulse + the eventual push notification), not a second magic number
- * to keep in sync.
+ * (this pulse + the real push notification), not a second magic number to
+ * keep in sync.
  *
- * Push notifications (§8a) are still M5 on the roadmap (§14) — not built
- * yet, so there's no backend constant to import here. Hardcoded as a named
- * constant so that once M5 lands (and a real shared-constant/settings
- * source exists), wiring this to it is a one-line change here, not a
- * redesign of the callers below.
+ * M5 (§14) landed the real push-notification backend, whose own copy of
+ * this constant lives at `backend/src/lib/constants.ts`. That's the one
+ * real *definition*; this one is an intentional duplicate, not a stale
+ * placeholder — the frontend and backend are separate npm packages with no
+ * shared module between them, so there's nothing to literally import
+ * across that boundary. If this value ever changes, update both files by
+ * hand (backend's constants.ts comment points back here for the same
+ * reason).
  */
 export const NOTIFICATION_LEAD_MINUTES = 30;
 

@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, primaryKey } from "drizzle-orm/sqlite-core";
 
 /**
  * Dateless, shared household to-do list.
@@ -74,3 +74,35 @@ export const deviceSessions = sqliteTable("device_sessions", {
   createdAt: text("created_at").notNull(),
   lastSeenAt: text("last_seen_at").notNull(),
 });
+
+/**
+ * §8a/§11 — one row per opted-in device's Web Push subscription, not scoped
+ * to a particular person. `endpoint` is unique because a browser's push
+ * endpoint uniquely identifies the subscription; re-subscribing the same
+ * device (e.g. after clearing storage) upserts on that column rather than
+ * accumulating duplicate rows (see actions/push.ts).
+ */
+export const pushSubscriptions = sqliteTable("push_subscriptions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  deviceLabel: text("device_label"),
+  createdAt: text("created_at").notNull(),
+});
+
+/**
+ * §8a/§11 — dedup log so a recurring event's Nth occurrence only ever
+ * notifies once, without needing occurrences to exist as real rows anywhere
+ * (§7a). Composite primary key on (event_id, occurrence_start_at) — the
+ * same pair the reminder scanner (lib/reminders.ts) checks before sending.
+ */
+export const sentReminders = sqliteTable(
+  "sent_reminders",
+  {
+    eventId: integer("event_id").notNull(),
+    occurrenceStartAt: text("occurrence_start_at").notNull(),
+    sentAt: text("sent_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.eventId, table.occurrenceStartAt] })],
+);

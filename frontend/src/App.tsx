@@ -11,6 +11,7 @@ import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth }
 import { friendlyErrorMessage } from "./lib/errors";
 import { useAuthGate } from "./lib/auth";
 import { useImminentEventKeys } from "./lib/imminent";
+import { enablePushNotifications } from "./lib/push";
 import { useLiveSync } from "./lib/useLiveSync";
 import { useAutoCollapse } from "./lib/useAutoCollapse";
 import { useMediaQuery } from "./lib/useMediaQuery";
@@ -132,11 +133,11 @@ function App() {
 
   useLiveSync(isAuthenticated);
 
-  // M2 UI-only mock (ARCHITECTURE.md §8a): the real trigger is "first time
-  // the installed PWA is opened," which needs real install/launch detection
-  // this pass deliberately doesn't build. localStorage stands in for that —
-  // shows once per browser, and the header button lets a reviewer bring it
-  // back on demand without clearing storage by hand.
+  // ARCHITECTURE.md §8a: the real trigger is "first time the installed PWA
+  // is opened," which needs real install/launch detection this pass still
+  // doesn't build (unchanged from the M2 mock). localStorage stands in for
+  // that — shows once per browser, and the header button lets a reviewer
+  // bring it back on demand without clearing storage by hand.
   const [notifPromptOpen, setNotifPromptOpen] = useState(false);
   useEffect(() => {
     try {
@@ -160,6 +161,15 @@ function App() {
       // no-op
     }
     setNotifPromptOpen(true);
+  }
+  // M5 (§8a): the real flow — requestPermission → pushManager.subscribe →
+  // POST /api/push/subscribe (lib/push.ts). Dismisses either way afterward;
+  // there's no settings surface to retry from if it fails/is denied (§8a
+  // has no notifications settings page), so nagging again on failure would
+  // just be annoying, not useful.
+  function handleEnableNotifications() {
+    void enablePushNotifications();
+    dismissNotifPrompt();
   }
 
   const { start, end } = gridRange(monthAnchor);
@@ -428,7 +438,7 @@ function App() {
         {expandedPanel === "todo" && <TodoList {...todoListSharedProps} expanded onToggleExpand={() => toggleExpand("todo")} />}
       </ExpandedPanelModal>
 
-      <NotificationPrompt open={notifPromptOpen} onDismiss={dismissNotifPrompt} />
+      <NotificationPrompt open={notifPromptOpen} onDismiss={dismissNotifPrompt} onEnable={handleEnableNotifications} />
 
       <AddEventSheet
         open={addEventOpen}

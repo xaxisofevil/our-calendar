@@ -22,5 +22,12 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // src/sw.ts (M5, ARCHITECTURE.md §4/§8a) needs the `webworker` lib
+  // (`/// <reference lib="webworker" />`), not `dom` — mixing both in one
+  // TS project isn't supported, so it's excluded from this app-wide
+  // project's type-checking. Vite/esbuild still transpiles and bundles it
+  // normally via vite-plugin-pwa's `injectManifest` strategy; only its own
+  // `tsc` type-checking is opted out here.
+  "exclude": ["src/sw.ts"]
 }

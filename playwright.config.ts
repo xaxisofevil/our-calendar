@@ -1,5 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
-import { E2E_AUTH_PASSCODE, E2E_AUTH_STATE_PATH } from "./e2e/helpers";
+import {
+  E2E_AUTH_PASSCODE,
+  E2E_AUTH_STATE_PATH,
+  E2E_REMINDER_SCAN_INTERVAL_MS,
+  E2E_VAPID_PRIVATE_KEY,
+  E2E_VAPID_PUBLIC_KEY,
+} from "./e2e/helpers";
 
 // Isolated QA run — never points at the real dev/prod instance (normally
 // :5173 frontend / :3001 backend, possibly holding real household data).
@@ -54,7 +60,18 @@ export default defineConfig({
       // child process by backend/scripts/reset-and-dev.mjs (which spreads
       // ...process.env). Never a real .env file for e2e — see
       // e2e/helpers.ts's E2E_AUTH_PASSCODE comment.
-      env: { PORT: String(BACKEND_PORT), AUTH_PASSCODE: E2E_AUTH_PASSCODE },
+      //
+      // VAPID_*/REMINDER_SCAN_INTERVAL_MS (§8a, M5): a throwaway keypair
+      // and a fast scan cadence, isolated-backend-only — see
+      // e2e/helpers.ts's E2E_VAPID_PUBLIC_KEY/E2E_REMINDER_SCAN_INTERVAL_MS
+      // comments.
+      env: {
+        PORT: String(BACKEND_PORT),
+        AUTH_PASSCODE: E2E_AUTH_PASSCODE,
+        VAPID_PUBLIC_KEY: E2E_VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY: E2E_VAPID_PRIVATE_KEY,
+        REMINDER_SCAN_INTERVAL_MS: String(E2E_REMINDER_SCAN_INTERVAL_MS),
+      },
       reuseExistingServer: false,
       timeout: 30_000,
       stdout: "pipe",
@@ -64,7 +81,12 @@ export default defineConfig({
       command: `npm run dev -- --port ${FRONTEND_PORT} --strictPort`,
       cwd: "./frontend",
       url: `http://localhost:${FRONTEND_PORT}`,
-      env: { BACKEND_PORT: String(BACKEND_PORT) },
+      // VITE_VAPID_PUBLIC_KEY (§8a, M5): Vite auto-exposes any VITE_-
+      // prefixed process env var via import.meta.env, no .env file needed
+      // — same throwaway keypair as the backend's VAPID_PUBLIC_KEY above
+      // (see e2e/helpers.ts), so lib/push.ts's enablePushNotifications()
+      // doesn't short-circuit as "unsupported" during push-notifications.spec.ts.
+      env: { BACKEND_PORT: String(BACKEND_PORT), VITE_VAPID_PUBLIC_KEY: E2E_VAPID_PUBLIC_KEY },
       reuseExistingServer: false,
       timeout: 30_000,
       stdout: "pipe",

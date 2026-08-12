@@ -10,6 +10,30 @@ import type { Page } from "@playwright/test";
  */
 export const E2E_AUTH_PASSCODE = "e2e-test-passcode-do-not-use-for-real";
 
+/**
+ * ARCHITECTURE.md §8a/§14 M5. A throwaway VAPID keypair generated once for
+ * this suite only (`web-push`'s `generateVAPIDKeys()`) — not the real
+ * household backend's keys (those live in a real, gitignored
+ * `backend/.env` this suite never reads), and not tied to any account.
+ * Configured for the isolated e2e backend/frontend only (see
+ * playwright.config.ts's webServer env), so `push-notifications.spec.ts`
+ * can exercise the real subscribe/scan code paths without ever attempting
+ * a real push delivery to a real device.
+ */
+export const E2E_VAPID_PUBLIC_KEY =
+  "BPd2TmC6huy1uHIjYBrclwPIgE3jOpKi4wr7bce1MnXoLp9plFDknbGibhlRJArRpUnnjllBI19W7YjYjFmWY3o";
+export const E2E_VAPID_PRIVATE_KEY = "ut6Odyp-DpfITiE8RZd-myT2VD06g-nFLZw2-ppPJWU";
+
+/**
+ * §8a's real cadence is 90s (1–2 minutes, see backend/src/lib/constants.ts)
+ * — far too slow for a test to wait on. Overridden to a few seconds for
+ * this isolated backend only via `REMINDER_SCAN_INTERVAL_MS` (same
+ * override mechanism `constants.ts` documents), so
+ * `push-notifications.spec.ts` can assert against real scan-tick behavior
+ * within a normal test timeout.
+ */
+export const E2E_REMINDER_SCAN_INTERVAL_MS = 2_000;
+
 /** Where the "setup" project (e2e/auth.setup.ts) writes its logged-in
  * storageState, and where the "chromium" project reads it back from — see
  * playwright.config.ts's `projects`. */

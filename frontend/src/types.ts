@@ -69,3 +69,18 @@ export interface UpdateTodoInput {
   position?: number;
   list?: string;
 }
+
+// ARCHITECTURE.md §8a/§12 — mirrors backend/src/actions/push.ts's
+// SubscribePushInput/PushSubscriptionDTO.
+export interface SubscribePushInput {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  deviceLabel?: string | null;
+}
+
+export interface PushSubscriptionRecord {
+  id: number;
+  endpoint: string;
+  deviceLabel: string | null;
+  createdAt: string;
+}
