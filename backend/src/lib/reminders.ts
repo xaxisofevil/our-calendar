@@ -52,9 +52,21 @@ function formatOccurrenceTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-/** §8a's fixed message template: `"{title} — {time} ({person})"`. */
-function buildReminderMessage(title: string, startAt: string, personLabel: string): string {
-  return `${title} — ${formatOccurrenceTime(startAt)} (${personLabel})`;
+/**
+ * §8a's fixed message content — revised after real-device testing: the
+ * event itself should be the headline (Android/iOS render the OS-level
+ * notification `title` in bold, most-prominent text), with the app name
+ * showing separately via the OS's own small-icon/origin chrome — putting
+ * "Our Calendar" in the title field was wasted, most-prominent space on
+ * something the person already knows just by looking at the icon. `title`
+ * is now the event's own title; `body` carries only the time/person detail.
+ */
+function buildReminderTitle(title: string): string {
+  return title;
+}
+
+function buildReminderBody(startAt: string, personLabel: string): string {
+  return `${formatOccurrenceTime(startAt)} · ${personLabel}`;
 }
 
 /**
@@ -92,13 +104,14 @@ export async function scanAndSendReminders(): Promise<void> {
     if (alreadySent) continue;
 
     const personLabel = occurrence.personId != null ? (peopleById.get(occurrence.personId) ?? "Someone") : "Someone";
-    const message = buildReminderMessage(occurrence.title, occurrence.startAt, personLabel);
-    // `body` is the exact §8a template; `title`/`data` give the service
-    // worker's `push` handler (frontend/src/sw.ts) enough to show a real OS
-    // notification without it needing to know the message format itself.
+    // `title` is the event itself (the OS's most-prominent notification
+    // text); `body` is the time/person detail. `eventId`/`occurrenceStartAt`
+    // give the service worker's `push` handler (frontend/src/sw.ts) enough
+    // to show a real OS notification without it needing to know the
+    // message format itself.
     const payload = JSON.stringify({
-      title: "Our Calendar",
-      body: message,
+      title: buildReminderTitle(occurrence.title),
+      body: buildReminderBody(occurrence.startAt, personLabel),
       eventId: occurrence.id,
       occurrenceStartAt: occurrence.startAt,
     });

@@ -39,6 +39,28 @@ function startOfDay(date: Date): Date {
   return d;
 }
 
+// A hardcoded "3pm" default (the old behavior) is wrong for exactly half
+// the day — if it's already past 3pm, that default is in the past, which
+// is confusing for a "new event" starting time. Round up to the next
+// half-hour from right now instead, so the default is never behind the
+// clock. (setHours normalizes an overflowing minute value correctly — e.g.
+// rounding 23:45 rolls into 00:00 the next day — we only ever read the
+// HH:mm portion back out, so the date-rollover itself is irrelevant here.)
+function roundedUpTimeString(base: Date): string {
+  const d = new Date(base);
+  const minutes = d.getMinutes();
+  const roundedMinutes = minutes === 0 ? 0 : minutes <= 30 ? 30 : 60;
+  d.setHours(d.getHours(), roundedMinutes, 0, 0);
+  return format(d, "HH:mm");
+}
+
+function addMinutesToTimeString(timeStr: string, minutesToAdd: number): string {
+  const [hours, minutes] = timeStr.split(":").map(Number);
+  const d = new Date();
+  d.setHours(hours || 0, (minutes || 0) + minutesToAdd, 0, 0);
+  return format(d, "HH:mm");
+}
+
 export function AddEventSheet({ open, selectedDate, people, editingEvent, error, onClose, onSave }: AddEventSheetProps) {
   const titleId = useId();
   const isEditing = editingEvent != null;
@@ -52,6 +74,11 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, error,
   const [allDay, setAllDay] = useState(false);
   const [startTime, setStartTime] = useState("15:00");
   const [endTime, setEndTime] = useState("16:00");
+  // Tracks whether the user has directly edited the end-time field in this
+  // session — while false, changing the start time auto-follows it (30 min
+  // later), matching Google Calendar's create-flow behavior. Once the user
+  // touches end time themselves, start-time changes stop dragging it along.
+  const [endTimeManuallySet, setEndTimeManuallySet] = useState(false);
   const [personId, setPersonId] = useState<number | null>(null);
   // Wired to `events.recurrence_rule` (ARCHITECTURE.md §7a) via
   // ruleFromRepeatValue/repeatValueFromRule — see handleSave and the
@@ -71,14 +98,19 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, error,
       setAllDay(editingEvent.allDay);
       setStartTime(format(new Date(editingEvent.startAt), "HH:mm"));
       setEndTime(format(new Date(editingEvent.endAt), "HH:mm"));
+      setEndTimeManuallySet(false);
       setPersonId(editingEvent.personId);
       setRepeat(repeatValueFromRule(editingEvent.recurrenceRule, new Date(editingEvent.startAt)));
     } else {
       setTitle("");
       setDescription("");
       setAllDay(false);
-      setStartTime("15:00");
-      setEndTime("16:00");
+      // Never defaults to a time already behind the clock — see
+      // roundedUpTimeString's comment.
+      const defaultStart = roundedUpTimeString(new Date());
+      setStartTime(defaultStart);
+      setEndTime(addMinutesToTimeString(defaultStart, 30));
+      setEndTimeManuallySet(false);
       setPersonId(people[0]?.id ?? null);
       setRepeat(defaultRepeatValue(selectedDate));
     }
@@ -256,7 +288,14 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, error,
               <input
                 type="time"
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setStartTime(next);
+                  // Google-Calendar-style: end time follows start time
+                  // (30 min later) until the user explicitly edits end
+                  // time themselves — see endTimeManuallySet's comment.
+                  if (!endTimeManuallySet) setEndTime(addMinutesToTimeString(next, 30));
+                }}
                 className="w-full rounded-[var(--radius-control)] border border-[var(--color-line)] bg-[var(--color-bg)] px-2.5 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
               />
             </label>
@@ -267,7 +306,10 @@ export function AddEventSheet({ open, selectedDate, people, editingEvent, error,
               <input
                 type="time"
                 value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                onChange={(e) => {
+                  setEndTime(e.target.value);
+                  setEndTimeManuallySet(true);
+                }}
                 className="w-full rounded-[var(--radius-control)] border border-[var(--color-line)] bg-[var(--color-bg)] px-2.5 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
               />
             </label>

@@ -96,8 +96,26 @@ export function listEvents(range?: ListEventsRange): EventDTO[] {
     return rows.map(serializeEvent);
   }
 
-  const rangeStart = new Date(`${range.start}T00:00:00.000Z`);
-  const rangeEnd = new Date(`${range.end}T23:59:59.999Z`);
+  // `range.start`/`range.end` are bare "yyyy-MM-dd" calendar-day strings —
+  // the frontend's own local calendar days (see dateUtils.ts's dateKey/
+  // gridRange), not UTC days. The server has no reliable way to know the
+  // browser's timezone, so treating these as literal UTC-midnight
+  // boundaries silently excludes/misplaces events whose local evening time
+  // has already rolled into the next UTC calendar day (any US timezone,
+  // for any event after ~7-8pm local, depending on DST) — a real bug that
+  // surfaced once event creation started defaulting to the actual current
+  // time instead of a fixed 3pm.
+  //
+  // Fix: widen the DB-query window by a comfortable ±24h safety margin,
+  // generous enough to cover every real-world UTC offset (-12 to +14).
+  // This intentionally over-fetches a little at the edges rather than
+  // risk excluding a real event — the frontend's `dateKey` grouping
+  // already does the precise, correct local-day bucketing for display, so
+  // a few extra out-of-view rows are harmless (they just sit in the
+  // returned list under a day that isn't currently rendered).
+  const SAFETY_MARGIN_MS = 24 * 60 * 60_000;
+  const rangeStart = new Date(new Date(`${range.start}T00:00:00.000Z`).getTime() - SAFETY_MARGIN_MS);
+  const rangeEnd = new Date(new Date(`${range.end}T23:59:59.999Z`).getTime() + SAFETY_MARGIN_MS);
   return listEventsBetween(rangeStart, rangeEnd);
 }
 
