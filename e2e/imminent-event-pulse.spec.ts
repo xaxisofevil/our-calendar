@@ -60,10 +60,15 @@ test.describe("Imminent-event pulse (ARCHITECTURE.md §8b)", () => {
     const startedRow = panel.locator("li", { hasText: alreadyStarted.title });
     const farOutRow = panel.locator("li", { hasText: farOut.title });
 
-    // Row-level: only the one starting in 10 minutes pulses.
-    await expect(imminentRow).toHaveClass(/imminent-row/);
-    await expect(startedRow).not.toHaveClass(/imminent-row/);
-    await expect(farOutRow).not.toHaveClass(/imminent-row/);
+    // Row-level: only the one starting in 10 minutes pulses. The class
+    // lives on the row's inner content div (not the <li> itself — applying
+    // it to both was a real bug: two nested elements both animating,
+    // where one was also an ancestor of SwipeRevealRow's overflow-clip
+    // boundary, caused a visible paint glitch during swipe-to-reveal on
+    // an imminent row), so check for it as a descendant, not on the <li>.
+    await expect(imminentRow.locator(".imminent-row")).toHaveCount(1);
+    await expect(startedRow.locator(".imminent-row")).toHaveCount(0);
+    await expect(farOutRow.locator(".imminent-row")).toHaveCount(0);
 
     // Dot-level: 3 distinct people = 3 dots on today's cell, exactly one
     // (Lindsay's) pulsing. (Dot size is now a --dot-size-N token read via
@@ -81,11 +86,11 @@ test.describe("Imminent-event pulse (ARCHITECTURE.md §8b)", () => {
     // doesn't require waiting out 11 real minutes or ticking 22 times.
     await page.clock.fastForward("11:00");
 
-    await expect(imminentRow).not.toHaveClass(/imminent-row/);
+    await expect(imminentRow.locator(".imminent-row")).toHaveCount(0);
     await expect(cell.locator("span.imminent-dot")).toHaveCount(0);
     // The other two rows/dots are unaffected by the clock jump.
-    await expect(startedRow).not.toHaveClass(/imminent-row/);
-    await expect(farOutRow).not.toHaveClass(/imminent-row/);
+    await expect(startedRow.locator(".imminent-row")).toHaveCount(0);
+    await expect(farOutRow.locator(".imminent-row")).toHaveCount(0);
   });
 
   test("prefers-reduced-motion swaps the pulse for a static highlight (no animation) on the imminent row", async ({
@@ -107,8 +112,9 @@ test.describe("Imminent-event pulse (ARCHITECTURE.md §8b)", () => {
     });
     await saveEventForm(page);
 
-    const row = page.locator('section[aria-label="Selected day"] li', { hasText: "Reduced motion imminent" });
-    await expect(row).toHaveClass(/imminent-row/);
+    const li = page.locator('section[aria-label="Selected day"] li', { hasText: "Reduced motion imminent" });
+    const row = li.locator(".imminent-row");
+    await expect(row).toHaveCount(1);
     // ARCHITECTURE.md §8b accessibility: "swapping the animation for a
     // static tinted highlight instead of an ongoing pulse" — the class is
     // still applied (same information), but index.css's reduced-motion

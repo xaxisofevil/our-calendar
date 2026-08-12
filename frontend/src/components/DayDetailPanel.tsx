@@ -101,7 +101,7 @@ export function DayDetailPanel({
             const accentColor = person?.color ?? "var(--color-accent)";
             const imminent = imminentEventKeys?.has(eventImminentKey(event)) ?? false;
             return (
-              <li key={event.id} data-swipe-row-id={event.id} className={cx(imminent && "imminent-row")}>
+              <li key={event.id} data-swipe-row-id={event.id}>
                 <SwipeRevealRow
                   isOpen={openSwipeId === event.id}
                   onOpenChange={(open) => setOpenSwipeId(open ? event.id : null)}
