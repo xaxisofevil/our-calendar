@@ -99,4 +99,13 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    host: true,
+    proxy: {
+      '/api': {
+        target: `http://localhost:${backendPort}`,
+        changeOrigin: true,
+      },
+    },
+  },
 })
