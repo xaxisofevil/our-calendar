@@ -21,6 +21,15 @@ interface VoiceCaptureState {
   // voice command just ran.
   actionNote: string | null;
   actionBusy: boolean;
+  // Direct request: replace one static "Working on it…" for the whole
+  // `commanding` wait (which can genuinely run 10-40s+ — §10's own
+  // observed research-path latency) with a few progressively-more-honest
+  // messages over time. This is *not* real backend progress reporting —
+  // there's no channel for that without a much bigger streaming change —
+  // just a plain client-side timer advancing through
+  // COMMANDING_PHASE_MESSAGES below. A wait that visibly changes reads as
+  // shorter than a static spinner even at the same real duration.
+  commandingPhase: number;
 }
 
 const IDLE_STATE: VoiceCaptureState = {
@@ -30,7 +39,15 @@ const IDLE_STATE: VoiceCaptureState = {
   commandResult: null,
   actionNote: null,
   actionBusy: false,
+  commandingPhase: 0,
 };
+
+// Exported so VoiceButton.tsx can render the exact text for the current
+// phase without duplicating this list. Thresholds are deliberately
+// conservative — round 1's own observed baseline for a simple direct-tool
+// call was already ~4s, so the first phase shouldn't flip before that.
+export const COMMANDING_PHASE_MESSAGES = ["Understanding…", "Looking that up…", "Still working on it — might be doing some research…"];
+const COMMANDING_PHASE_THRESHOLDS_MS = [4_000, 12_000]; // advance to phase 1 at 4s, phase 2 at 12s
 
 const UNSUPPORTED_MESSAGE = "Voice input isn't available on this browser.";
 const MIC_DENIED_MESSAGE = "Microphone access was blocked — allow it for this site in your browser settings to use voice.";
@@ -128,12 +145,22 @@ export function useVoiceCapture() {
             }
 
             setState({ ...IDLE_STATE, status: "commanding", transcript });
+            const phaseTimers = COMMANDING_PHASE_THRESHOLDS_MS.map((ms, i) =>
+              setTimeout(() => {
+                // Guard against a stray timer firing after the request already
+                // settled and moved state on (e.g. a very fast response
+                // landing right as a later threshold's timer was queued).
+                setState((s) => (s.status === "commanding" ? { ...s, commandingPhase: i + 1 } : s));
+              }, ms),
+            );
             try {
               const commandResult = await runVoiceCommand(transcript);
+              phaseTimers.forEach(clearTimeout);
               activeRef.current = false;
               if (commandResult.outcome === "executed") refreshData();
               setState({ ...IDLE_STATE, status: "done", transcript, commandResult });
             } catch (err) {
+              phaseTimers.forEach(clearTimeout);
               activeRef.current = false;
               setState({
                 ...IDLE_STATE,

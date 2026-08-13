@@ -1,7 +1,7 @@
 import { type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../lib/cx";
-import { useVoiceCapture } from "../lib/useVoiceCapture";
+import { COMMANDING_PHASE_MESSAGES, useVoiceCapture } from "../lib/useVoiceCapture";
 import { useAutoListenConfirm } from "../lib/useAutoListenConfirm";
 
 function MicIcon() {
@@ -66,6 +66,7 @@ export function VoiceButton() {
     commandResult,
     actionNote,
     actionBusy,
+    commandingPhase,
     start,
     stop,
     reset,
@@ -175,7 +176,7 @@ export function VoiceButton() {
             {status === "uploading" ? (
               <p className="text-[var(--color-ink-soft)]">Transcribing…</p>
             ) : status === "commanding" ? (
-              <p className="text-[var(--color-ink-soft)]">Working on it…</p>
+              <p className="text-[var(--color-ink-soft)]">{COMMANDING_PHASE_MESSAGES[commandingPhase]}</p>
             ) : errorMessage ? (
               <p className="text-[var(--color-ink-soft)]">{errorMessage}</p>
             ) : actionNote ? (

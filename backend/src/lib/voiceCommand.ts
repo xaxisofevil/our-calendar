@@ -1,4 +1,5 @@
 import { getBatch, mintBatchId } from "../actions/batches.js";
+import { listPeople } from "../actions/people.js";
 import { recordVoiceCommand, type VoiceCommandStatus, type VoiceModelTier } from "../actions/voiceCommands.js";
 import { voiceLlmOutputSchema, type ProposedDestructiveAction, type VoiceLlmOutput } from "./validation.js";
 import { ClaudeCliConfigError, ClaudeCliError, runClaudeCommand, type ClaudeCliSpawnFn } from "./claudeCli.js";
@@ -86,7 +87,24 @@ const VOICE_LLM_JSON_SCHEMA = {
   required: ["needsResearch", "actionTaken", "proposedDestructiveAction"],
 };
 
-const HOUSEHOLD_MEMBERS = "Eric, Lindsay, Gavin, Damien";
+// Speed fix, direct request: the household's real person ids (not just
+// names) go straight into the system prompt now, so haiku can pass
+// personId to create_event directly instead of needing its own
+// list_people tool call first to resolve "Gavin" -> an id — one fewer
+// sequential MCP round-trip on every "add X for <person>" command, which
+// measurably added to real observed latency. This is a plain local DB
+// read (actions/people.ts's listPeople, same one list_people the MCP
+// server itself calls), not a network/LLM round-trip, so it's
+// effectively free to do on every buildSystemPrompt call rather than
+// caching it — household membership changes so rarely that a cache would
+// only risk serving stale ids for no real benefit. list_people stays in
+// both tools' allowedTools regardless, for the genuinely ambiguous case
+// (a nickname, "the other Gavin," etc.) — this only removes the *need*
+// to call it for the common, unambiguous case, never the ability to.
+function householdMembersLine(): string {
+  const people = listPeople();
+  return people.map((p) => `${p.label} (id ${p.id})`).join(", ");
+}
 
 function buildSystemPrompt(tier: "haiku" | "sonnet"): string {
   const now = new Date();
@@ -94,12 +112,12 @@ function buildSystemPrompt(tier: "haiku" | "sonnet"): string {
 
   const shared = `You are the voice command triage assistant for "Our Calendar", a shared household calendar/to-do app. You will receive one voice transcript as the user's message — it may be informal, mis-transcribed, or ambiguous; do your best to interpret it charitably, but never guess a verifiable fact you could instead look up or ask to have researched.
 
-Household members: ${HOUSEHOLD_MEMBERS}. ${dateLine}
+Household members: ${householdMembersLine()}. ${dateLine}
 
 Respond only via the required structured output — no free-form prose outside it. Set exactly one of needsResearch / actionTaken / proposedDestructiveAction; leave the other two null.
 
 Rules:
-- A straightforward creation (a new calendar event or to-do item) you have enough information for: call create_event or add_todo directly, then set actionTaken describing what you added.
+- A straightforward creation (a new calendar event or to-do item) you have enough information for: call create_event or add_todo directly, then set actionTaken describing what you added. If it's for a specific household member, pass their id (given above) as personId directly — don't call list_people first just to look up an id you already have; only call it if the person meant is genuinely unclear (a nickname, "the other one," etc.).
 - A request that needs real-world facts you can't reliably know: set needsResearch, don't guess.
 - A request to delete or change an EXISTING event or todo: you have no tool that can do this. Use list_events/list_todos/list_people to find the specific row, then set proposedDestructiveAction — never attempt the change yourself.
 - Not an actionable calendar/to-do request at all: don't call any tool, set actionTaken explaining that plainly.`;
