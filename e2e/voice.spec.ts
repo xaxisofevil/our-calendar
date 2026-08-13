@@ -47,7 +47,13 @@ test.describe("POST /api/voice/transcribe", () => {
       headers: { "Content-Type": "audio/webm" },
     });
     expect(res.status()).toBe(200);
-    expect(await res.json()).toEqual({ transcript: "add milk to the list" });
+    // ARCHITECTURE.md §10b (M9) — `words` (per-word confidence, the
+    // auto-listen confirm gate's own input) is new alongside `transcript`;
+    // this test only cares that the transcript came through correctly, so
+    // it checks that field specifically rather than an exact object match
+    // that would need updating every time a response gains a field.
+    const body = await res.json();
+    expect(body.transcript).toBe("add milk to the list");
   });
 
   test("a silent/unintelligible clip returns an empty transcript, not an error", async ({ page }) => {
@@ -56,7 +62,9 @@ test.describe("POST /api/voice/transcribe", () => {
       headers: { "Content-Type": "audio/webm" },
     });
     expect(res.status()).toBe(200);
-    expect(await res.json()).toEqual({ transcript: "" });
+    const body = await res.json();
+    expect(body.transcript).toBe("");
+    expect(body.words).toEqual([]);
   });
 
   test("rejects a request with no audio body at all", async ({ page }) => {

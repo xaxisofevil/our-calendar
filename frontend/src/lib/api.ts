@@ -7,6 +7,7 @@ import type {
   PushSubscriptionRecord,
   SubscribePushInput,
   TodoRecord,
+  TranscribeVoiceResult,
   UndoBatchResult,
   UpdateEventInput,
   UpdateTodoInput,
@@ -101,7 +102,7 @@ export function unsubscribePush(endpoint: string): Promise<void> {
 // human-readable string ("Voice transcription isn't set up yet.", etc.),
 // so this throws that string directly rather than re-wrapping it in extra
 // quotes friendlyErrorMessage was never meant to unwrap.
-export async function transcribeVoice(blob: Blob): Promise<{ transcript: string }> {
+export async function transcribeVoice(blob: Blob): Promise<TranscribeVoiceResult> {
   let res: Response;
   try {
     res = await fetch("/api/voice/transcribe", {
@@ -121,7 +122,7 @@ export async function transcribeVoice(blob: Blob): Promise<{ transcript: string 
     const body = await res.json().catch(() => null);
     throw new Error(typeof body?.error === "string" ? body.error : "Couldn't transcribe that — please try again.");
   }
-  return res.json() as Promise<{ transcript: string }>;
+  return res.json() as Promise<TranscribeVoiceResult>;
 }
 
 // ARCHITECTURE.md §10/§12 (M8) — takes a transcript (from transcribeVoice

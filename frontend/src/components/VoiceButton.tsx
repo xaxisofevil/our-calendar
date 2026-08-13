@@ -2,6 +2,7 @@ import { type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../lib/cx";
 import { useVoiceCapture } from "../lib/useVoiceCapture";
+import { useAutoListenConfirm } from "../lib/useAutoListenConfirm";
 
 function MicIcon() {
   return (
@@ -46,9 +47,16 @@ const STATUS_LABEL: Record<string, string> = {
  * what got created (with a plain Undo button, via the batch id — see
  * useVoiceCapture's `undoBatch`), a plain Confirm/Cancel pair for a
  * proposed destructive action awaiting confirmation, or a plain "nothing
- * to do" / error message. No auto-listening voice-driven confirmation
- * here on purpose — that's an explicit follow-up, not part of this pass;
- * confirming/cancelling here is always a manual tap.
+ * to do" / error message.
+ *
+ * ARCHITECTURE.md §10b (M9) — a `needs_confirmation` result now also
+ * auto-opens the mic via useAutoListenConfirm (no new tap), listening for
+ * a clear spoken yes/no on top of the manual Confirm/Cancel pair, which
+ * always stays visible and tappable the whole time — the auto-listen path
+ * either fires the exact same confirmAction/cancelAction the buttons do,
+ * or does nothing at all. `autoListenStatus` drives a visibly distinct
+ * indicator (separate from the recording button's own pulse) so nobody
+ * has to wonder whether the mic is on.
  */
 export function VoiceButton() {
   const {
@@ -67,13 +75,22 @@ export function VoiceButton() {
     supported,
   } = useVoiceCapture();
 
+  const proposedAction =
+    commandResult?.outcome === "needs_confirmation" ? commandResult.proposedAction : undefined;
+  const { status: autoListenStatus } = useAutoListenConfirm({
+    proposedAction,
+    onConfirm: confirmAction,
+    onCancel: cancelAction,
+  });
+  const autoListening = autoListenStatus !== "idle";
+
   const recording = status === "recording";
   const busy = status === "uploading" || status === "commanding";
   const resultVisible = status === "done" || status === "error";
 
   function handlePressStart(e: ReactPointerEvent<HTMLButtonElement>) {
     if (e.button != null && e.button !== 0) return; // primary button/touch/pen only
-    if (recording || busy) return;
+    if (recording || busy || autoListening) return; // don't stack a manual capture on top of auto-listen's own mic session
     e.currentTarget.setPointerCapture(e.pointerId);
     start();
   }
@@ -87,26 +104,49 @@ export function VoiceButton() {
 
   return (
     <div className="relative">
+      {/* ARCHITECTURE.md §10b (M9) — a visibly distinct "the mic just
+          turned itself on" signal, deliberately not just a reuse of the
+          recording button's own pulse (that pulse means "I'm holding this
+          button down"; this means "the app opened the mic on its own" —
+          a family member should never have to guess which one they're
+          looking at). An expanding ring in --color-good (this app's
+          existing "positive/success" token, used nowhere else on this
+          button) rather than the accent color the manual-recording pulse
+          already owns. */}
+      {autoListening && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -m-1 animate-ping rounded-full bg-[var(--color-good)] opacity-60"
+        />
+      )}
       <button
         type="button"
         onPointerDown={handlePressStart}
         onPointerUp={handlePressEnd}
         onPointerCancel={handlePressEnd}
-        aria-label={supported ? (STATUS_LABEL[status] ?? STATUS_LABEL.idle) : "Voice input isn't available on this browser"}
+        aria-label={
+          !supported
+            ? "Voice input isn't available on this browser"
+            : autoListening
+              ? "Listening for yes or no…"
+              : (STATUS_LABEL[status] ?? STATUS_LABEL.idle)
+        }
         aria-pressed={recording}
         className={cx(
-          "grid h-7 w-7 flex-none cursor-pointer touch-none place-items-center rounded-full border text-sm transition-colors select-none",
+          "relative grid h-7 w-7 flex-none cursor-pointer touch-none place-items-center rounded-full border text-sm transition-colors select-none",
           recording
             ? "animate-pulse border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-ink)]"
-            : busy
-              ? "border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-ink-faint)]"
-              : "border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-ink-soft)]",
+            : autoListening
+              ? "border-[var(--color-good)] bg-[var(--color-good)] text-[var(--color-accent-ink)]"
+              : busy
+                ? "border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-ink-faint)]"
+                : "border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-ink-soft)]",
         )}
       >
         <MicIcon />
       </button>
 
-      {(busy || resultVisible) &&
+      {(busy || resultVisible || autoListening) &&
         // Real bug, found via direct report: this first rendered as a small
         // panel directly under the button (absolute/top-full) — for a
         // press-and-hold header button, that's exactly where a thumb is
@@ -152,6 +192,20 @@ export function VoiceButton() {
               <p className="text-[var(--color-ink)]">Heard: “{transcript}”</p>
             ) : (
               <p className="text-[var(--color-ink-soft)]">Didn't catch that — try again.</p>
+            )}
+
+            {/* ARCHITECTURE.md §10b (M9) — the toast's own textual echo of
+                the same auto-listen state the ring around the mic button
+                shows, for anyone not looking directly at the button (or
+                using a screen reader — this whole panel is
+                aria-live="polite"). Confirm/Cancel below stay fully
+                visible and tappable the entire time; this is purely
+                informational. */}
+            {commandResult?.outcome === "needs_confirmation" && commandResult.proposedAction && autoListening && (
+              <p className="mt-1 flex items-center gap-1.5 text-[10px] font-bold text-[var(--color-good)]">
+                <span aria-hidden="true" className="h-1.5 w-1.5 flex-none animate-pulse rounded-full bg-[var(--color-good)]" />
+                {autoListenStatus === "listening" ? "Listening — say yes or no…" : "Checking what you said…"}
+              </p>
             )}
 
             {resultVisible && commandResult?.outcome === "needs_confirmation" && commandResult.proposedAction && (
