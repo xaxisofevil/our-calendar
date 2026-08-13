@@ -18,7 +18,11 @@ qualifying occurrence and recording it in `sent_reminders` exactly once
 across multiple ticks, an out-of-window occurrence correctly never
 recorded, and the real "Enable notifications" UI flow with the browser's
 `Notification`/`PushManager` APIs mocked — see ARCHITECTURE.md §8a's
-"Implementation (M5 — done)" subsection). The hide-completed-todos toggle
+"Implementation (M5 — done)" subsection), and M7 (`voice.spec.ts` —
+`POST /api/voice/transcribe`'s success/silent-clip/empty-body/Deepgram-error/
+unconfigured-key paths, and the push-to-talk UI flow with the browser's
+`MediaRecorder`/`getUserMedia` mocked — see ARCHITECTURE.md §9's
+"Implementation (M7 — done)" subsection). The hide-completed-todos toggle
 is still UI-only per ARCHITECTURE.md's M2 scope (deliberately per-device
 localStorage, no backend persistence planned/needed).
 
@@ -31,6 +35,14 @@ deliberately doesn't expose one), assertions on their contents read the
 isolated e2e SQLite file directly (`e2e/db.ts`, read-only) rather than the
 real dev/prod database.
 
+`voice.spec.ts` runs against a fake `DEEPGRAM_API_KEY` pointed at a local
+mock server (`e2e/mock-deepgram-server.mjs`) instead of the real Deepgram
+API — there is no real key available yet (see ARCHITECTURE.md §9). Its
+"key isn't configured" test hits a second, minimal backend instance
+(`:4403`) that deliberately has no key set at all, rather than toggling the
+primary backend's config mid-suite — see `playwright.config.ts`'s comments
+on both extra processes.
+
 ## Running
 
 ```
@@ -39,11 +51,12 @@ npx playwright install chromium   # first time only
 npm run test:e2e
 ```
 
-This starts an isolated backend on `:4001` and an isolated Vite dev server on
-`:4173` (see `playwright.config.ts`), **never** the normal `:3001`/`:5173`
-dev instance that may hold real household data. The backend wipes its own
-`backend/data/` directory on boot for every `test:e2e` run (see
-`backend/scripts/reset-and-dev.mjs`) and reseeds from
+This starts an isolated backend on `:4001`, an isolated Vite dev server on
+`:4173`, a mock Deepgram server on `:4402`, and a second minimal backend
+with no Deepgram key on `:4403` (see `playwright.config.ts`) — **never** the
+normal `:3001`/`:5173` dev instance that may hold real household data. The
+primary backend wipes its own `backend/data/` directory on boot for every
+`test:e2e` run (see `backend/scripts/reset-and-dev.mjs`) and reseeds from
 `backend/src/db/seed.ts`, so runs are deterministic and don't accumulate
 cruft across repeated invocations.
 

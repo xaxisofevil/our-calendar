@@ -7,6 +7,7 @@ import { todosRouter } from "./routes/todos.js";
 import { streamRouter } from "./routes/stream.js";
 import { authRouter } from "./routes/auth.js";
 import { pushRouter } from "./routes/push.js";
+import { voiceRouter } from "./routes/voice.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { scanAndSendReminders } from "./lib/reminders.js";
 import { REMINDER_SCAN_INTERVAL_MS } from "./lib/constants.js";
@@ -80,6 +81,9 @@ app.use("/api/events", eventsRouter);
 app.use("/api/todos", todosRouter);
 app.use("/api/people", peopleRouter);
 app.use("/api/push", pushRouter);
+// ARCHITECTURE.md §9 (M7) — POST /api/voice/transcribe. Behind the same
+// requireAuth gate as every other /api/* route (mounted above, §5/§12).
+app.use("/api/voice", voiceRouter);
 
 // Minimal error handler so a thrown/rejected handler returns JSON, not an
 // HTML stack trace, to a frontend that only ever expects JSON.

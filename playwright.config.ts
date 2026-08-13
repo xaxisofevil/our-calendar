@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import {
   E2E_AUTH_PASSCODE,
   E2E_AUTH_STATE_PATH,
+  E2E_DEEPGRAM_API_KEY,
   E2E_REMINDER_SCAN_INTERVAL_MS,
   E2E_VAPID_PRIVATE_KEY,
   E2E_VAPID_PUBLIC_KEY,
@@ -16,6 +17,17 @@ import {
 // seed script's known fixture state.
 const BACKEND_PORT = 4001;
 const FRONTEND_PORT = 4173;
+// ARCHITECTURE.md §9 (M7) — two more isolated processes, just for
+// e2e/voice.spec.ts: a mock Deepgram HTTP server (there's no real
+// DEEPGRAM_API_KEY available yet — see §9's own "Implementation" note) the
+// primary backend above is pointed at via DEEPGRAM_API_URL for the
+// success/error-passthrough cases, and a second, minimal backend instance
+// that deliberately has no DEEPGRAM_API_KEY configured at all, so
+// voice.spec.ts can hit a real "not configured" response without needing
+// the primary shared backend (used by every other spec in this suite) to
+// flip that config on and off mid-run.
+const DEEPGRAM_MOCK_PORT = 4402;
+const VOICE_UNCONFIGURED_BACKEND_PORT = 4403;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -65,12 +77,19 @@ export default defineConfig({
       // and a fast scan cadence, isolated-backend-only — see
       // e2e/helpers.ts's E2E_VAPID_PUBLIC_KEY/E2E_REMINDER_SCAN_INTERVAL_MS
       // comments.
+      //
+      // DEEPGRAM_API_KEY/DEEPGRAM_API_URL (§9, M7): a fake key, and the
+      // real Deepgram endpoint swapped for the local mock server started
+      // below — see e2e/helpers.ts's E2E_DEEPGRAM_API_KEY comment and
+      // e2e/mock-deepgram-server.mjs.
       env: {
         PORT: String(BACKEND_PORT),
         AUTH_PASSCODE: E2E_AUTH_PASSCODE,
         VAPID_PUBLIC_KEY: E2E_VAPID_PUBLIC_KEY,
         VAPID_PRIVATE_KEY: E2E_VAPID_PRIVATE_KEY,
         REMINDER_SCAN_INTERVAL_MS: String(E2E_REMINDER_SCAN_INTERVAL_MS),
+        DEEPGRAM_API_KEY: E2E_DEEPGRAM_API_KEY,
+        DEEPGRAM_API_URL: `http://localhost:${DEEPGRAM_MOCK_PORT}/v1/listen`,
       },
       reuseExistingServer: false,
       timeout: 30_000,
@@ -87,6 +106,43 @@ export default defineConfig({
       // (see e2e/helpers.ts), so lib/push.ts's enablePushNotifications()
       // doesn't short-circuit as "unsupported" during push-notifications.spec.ts.
       env: { BACKEND_PORT: String(BACKEND_PORT), VITE_VAPID_PUBLIC_KEY: E2E_VAPID_PUBLIC_KEY },
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    // ARCHITECTURE.md §9 (M7) — mock Deepgram HTTP server, see
+    // e2e/mock-deepgram-server.mjs's own header for exactly how it decides
+    // what to respond with. Plain node:http, no deps, so no separate
+    // package/install step.
+    {
+      command: "node e2e/mock-deepgram-server.mjs",
+      cwd: ".",
+      url: `http://localhost:${DEEPGRAM_MOCK_PORT}/health`,
+      env: { PORT: String(DEEPGRAM_MOCK_PORT) },
+      reuseExistingServer: false,
+      timeout: 15_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    // ARCHITECTURE.md §9 (M7) — a second, minimal backend instance used
+    // only by voice.spec.ts's "DEEPGRAM_API_KEY isn't configured" test (see
+    // the constant's own comment above for why this needs to be a separate
+    // process rather than toggling the primary backend's config). No
+    // AUTH_PASSCODE (requireAuth no-ops when unset, same escape hatch as
+    // every other backend instance without it — see middleware/requireAuth.ts),
+    // and its own DB_DIR_NAME so it never touches the primary e2e run's
+    // SQLite file (voice transcription doesn't touch the database at all,
+    // so there's nothing meaningful in this one — it exists purely to be a
+    // real running server with Deepgram genuinely unconfigured).
+    {
+      command: "npx tsx src/index.ts",
+      cwd: "./backend",
+      url: `http://localhost:${VOICE_UNCONFIGURED_BACKEND_PORT}/api/health`,
+      env: {
+        PORT: String(VOICE_UNCONFIGURED_BACKEND_PORT),
+        DB_DIR_NAME: "data-e2e-voice-unconfigured",
+      },
       reuseExistingServer: false,
       timeout: 30_000,
       stdout: "pipe",

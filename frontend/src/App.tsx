@@ -7,6 +7,7 @@ import { AddEventSheet } from "./components/AddEventSheet";
 import { ExpandedPanelModal } from "./components/ExpandedPanelModal";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { PasscodeScreen } from "./components/PasscodeScreen";
+import { VoiceButton } from "./components/VoiceButton";
 import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth } from "./lib/dateUtils";
 import { friendlyErrorMessage } from "./lib/errors";
 import { useAuthGate } from "./lib/auth";
@@ -348,6 +349,10 @@ function App() {
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* ARCHITECTURE.md §9 (M7) — push-to-talk voice capture. Self-
+              contained (see VoiceButton.tsx's own header comment for why),
+              so mounting it here is the entire wiring this needs. */}
+          <VoiceButton />
           <button
             type="button"
             onClick={previewNotifPrompt}

@@ -25,6 +25,15 @@ export const E2E_VAPID_PUBLIC_KEY =
 export const E2E_VAPID_PRIVATE_KEY = "ut6Odyp-DpfITiE8RZd-myT2VD06g-nFLZw2-ppPJWU";
 
 /**
+ * ARCHITECTURE.md §9 (M7) — a fake Deepgram API key, configured for the
+ * isolated e2e backend only, which is pointed at a local mock server
+ * (e2e/mock-deepgram-server.mjs) instead of the real Deepgram API — there
+ * is no real DEEPGRAM_API_KEY available yet (see §9's own "Implementation"
+ * note). Never sent to any real Deepgram endpoint; not tied to any account.
+ */
+export const E2E_DEEPGRAM_API_KEY = "e2e-fake-deepgram-key-do-not-use-for-real";
+
+/**
  * §8a's real cadence is 90s (1–2 minutes, see backend/src/lib/constants.ts)
  * — far too slow for a test to wait on. Overridden to a few seconds for
  * this isolated backend only via `REMINDER_SCAN_INTERVAL_MS` (same
