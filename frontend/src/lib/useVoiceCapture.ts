@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { confirmVoiceAction, runVoiceCommand, transcribeVoice, undoVoiceBatch } from "./api";
 import type { VoiceCommandResult } from "../types";
 
@@ -70,6 +71,25 @@ function isVoiceCaptureSupported(): boolean {
  */
 export function useVoiceCapture() {
   const [state, setState] = useState<VoiceCaptureState>(IDLE_STATE);
+  const queryClient = useQueryClient();
+  // Real bug, found via direct report: this hook never invalidated the
+  // events/todos query caches itself after a successful command/confirm/
+  // undo — it relied entirely on useLiveSync's SSE round-trip to notice
+  // its *own* change and refresh the view, which is backwards. SSE exists
+  // so *other* tabs learn about a change; the tab that just made the
+  // change already knows for certain one happened and shouldn't need a
+  // network round-trip back to itself to find out — especially not one
+  // that can be delayed or missed if the tab was backgrounded during a
+  // slow voice command (mobile browsers throttle/suspend background
+  // EventSource connections). Invalidating both keys unconditionally
+  // (rather than trying to infer event-vs-todo from the result) is simple
+  // and always correct — create_event/add_todo are voice's only two
+  // direct-write tools, and a wasted refetch of the one that didn't
+  // change is cheap.
+  const refreshData = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["events"] });
+    queryClient.invalidateQueries({ queryKey: ["todos"] });
+  }, [queryClient]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -111,6 +131,7 @@ export function useVoiceCapture() {
             try {
               const commandResult = await runVoiceCommand(transcript);
               activeRef.current = false;
+              if (commandResult.outcome === "executed") refreshData();
               setState({ ...IDLE_STATE, status: "done", transcript, commandResult });
             } catch (err) {
               activeRef.current = false;
@@ -133,7 +154,7 @@ export function useVoiceCapture() {
       };
       recorder.stop();
     },
-    [releaseStream],
+    [releaseStream, refreshData],
   );
 
   const start = useCallback(async () => {
@@ -204,6 +225,7 @@ export function useVoiceCapture() {
     setState((s) => ({ ...s, actionBusy: true }));
     try {
       await confirmVoiceAction(action);
+      refreshData();
       setState((s) => ({ ...s, actionBusy: false, actionNote: "Done — that's been applied.", commandResult: null }));
     } catch (err) {
       setState((s) => ({
@@ -212,7 +234,7 @@ export function useVoiceCapture() {
         actionNote: err instanceof Error ? err.message : GENERIC_MESSAGE,
       }));
     }
-  }, [state.commandResult]);
+  }, [state.commandResult, refreshData]);
 
   const cancelAction = useCallback(() => {
     setState((s) => ({ ...s, commandResult: null, actionNote: "Cancelled — nothing was changed." }));
@@ -224,6 +246,7 @@ export function useVoiceCapture() {
     setState((s) => ({ ...s, actionBusy: true }));
     try {
       await undoVoiceBatch(batchId);
+      refreshData();
       setState((s) => ({ ...s, actionBusy: false, actionNote: "Undone.", commandResult: null }));
     } catch (err) {
       setState((s) => ({
@@ -232,7 +255,7 @@ export function useVoiceCapture() {
         actionNote: err instanceof Error ? err.message : GENERIC_MESSAGE,
       }));
     }
-  }, [state.commandResult]);
+  }, [state.commandResult, refreshData]);
 
   return {
     ...state,
