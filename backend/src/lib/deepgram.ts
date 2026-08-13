@@ -88,7 +88,9 @@ export async function transcribeAudio(
     body: audio as unknown as BodyInit,
   });
 
-  if (!res.ok) throw new DeepgramApiError(res.status);
+  if (!res.ok) {
+    throw new DeepgramApiError(res.status);
+  }
 
   const data = (await res.json()) as DeepgramListenResponse;
   return data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";

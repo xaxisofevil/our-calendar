@@ -1,4 +1,5 @@
 import { type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { cx } from "../lib/cx";
 import { useVoiceCapture } from "../lib/useVoiceCapture";
 
@@ -91,38 +92,53 @@ export function VoiceButton() {
         <MicIcon />
       </button>
 
-      {uploading && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="absolute right-0 top-full z-20 mt-2 w-44 rounded-[var(--radius-panel)] border border-[var(--color-line)] bg-[var(--color-surface)] p-2.5 text-xs text-[var(--color-ink-soft)] shadow-[0_1px_2px_rgba(0,0,0,0.08),0_18px_36px_-18px_rgba(0,0,0,0.45)]"
-        >
-          Transcribing…
-        </div>
-      )}
-
-      {resultVisible && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="absolute right-0 top-full z-20 mt-2 w-64 rounded-[var(--radius-panel)] border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs shadow-[0_1px_2px_rgba(0,0,0,0.08),0_18px_36px_-18px_rgba(0,0,0,0.45)]"
-        >
-          {errorMessage ? (
-            <p className="text-[var(--color-ink-soft)]">{errorMessage}</p>
-          ) : transcript ? (
-            <p className="text-[var(--color-ink)]">Heard: “{transcript}”</p>
-          ) : (
-            <p className="text-[var(--color-ink-soft)]">Didn't catch that — try again.</p>
-          )}
-          <button
-            type="button"
-            onClick={reset}
-            className="mt-1.5 cursor-pointer text-[10px] font-bold text-[var(--color-ink-faint)]"
+      {(uploading || resultVisible) &&
+        // Real bug, found via direct report: this first rendered as a small
+        // panel directly under the button (absolute/top-full) — for a
+        // press-and-hold header button, that's exactly where a thumb is
+        // still hovering right after release, so it was effectively
+        // invisible every time. Moved to a bottom-anchored toast (matching
+        // NotificationPrompt.tsx's mobile toast) to get it away from the
+        // thumb — which surfaced a *second*, real bug: `<header>` (App.tsx)
+        // sets its own `relative` + explicit `z-[1]`, which creates a new
+        // stacking context. Any `position: fixed` descendant of the header
+        // — no matter its own z-index — is stacked *within* that context,
+        // capped at the header's own z-1 level relative to sibling cards
+        // (the calendar strip, day-detail, etc.), so it rendered visually
+        // behind them regardless of z-30 here. `createPortal` to
+        // `document.body` escapes the header's stacking context entirely,
+        // the same way it would need to if this toast were a modal — a
+        // fixed-position element nested inside ANY ancestor that creates a
+        // stacking context (an explicit z-index + non-static position, a
+        // transform, etc.) needs a portal to reliably stack above siblings
+        // of that ancestor, not just a higher z-index of its own.
+        createPortal(
+          <div
+            role="status"
+            aria-live="polite"
+            className="fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-30 rounded-[var(--radius-panel)] border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs shadow-[0_1px_2px_rgba(0,0,0,0.08),0_18px_36px_-18px_rgba(0,0,0,0.45)]"
           >
-            Dismiss
-          </button>
-        </div>
-      )}
+            {uploading ? (
+              <p className="text-[var(--color-ink-soft)]">Transcribing…</p>
+            ) : errorMessage ? (
+              <p className="text-[var(--color-ink-soft)]">{errorMessage}</p>
+            ) : transcript ? (
+              <p className="text-[var(--color-ink)]">Heard: “{transcript}”</p>
+            ) : (
+              <p className="text-[var(--color-ink-soft)]">Didn't catch that — try again.</p>
+            )}
+            {resultVisible && (
+              <button
+                type="button"
+                onClick={reset}
+                className="mt-1.5 cursor-pointer text-[10px] font-bold text-[var(--color-ink-faint)]"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
