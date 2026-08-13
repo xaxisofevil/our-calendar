@@ -331,34 +331,45 @@ A purely visual companion to §8a's push, for the screen that's already glanceab
 
 ## 9. Voice — Deepgram Integration (v2, not v1)
 
-Push-to-talk button → browser `MediaRecorder` captures a short clip → uploaded as one blob to the backend on release → backend calls **Deepgram's pre-recorded transcription REST endpoint** (not the streaming/WebSocket API — simpler, and for short commands the latency difference is imperceptible; streaming is a v3 optimization if it's ever needed) → transcript returned to the client and handed to the LLM layer below.
+Push-to-talk button → browser `MediaRecorder` captures a short clip → uploaded as one blob to the backend on release → backend calls **Deepgram's pre-recorded transcription REST endpoint** (not the streaming/WebSocket API — simpler, and for short commands the latency difference is imperceptible; streaming is a v3 optimization if it's ever needed) → transcript returned to the client and handed to the command layer below. Unchanged by the §10 correction below — Deepgram is still exactly how the audio becomes text.
 
 ---
 
-## 10. LLM Command Layer (v2, not v1)
+## 10. Command Layer (v2, not v1)
 
-This is the one place the brief explicitly calls out a hard safety constraint, and the design honors it literally: **the LLM never executes anything.** It only ever returns a structured proposal.
+**Correction to earlier planning, recorded here because it changed the design materially:** the original plan called for a local Ollama model, on the reasoning that "runs locally on my PC" meant local *inference*. It didn't — it meant driving this through Claude Code (or an equivalent CLI backed by an existing Claude/ChatGPT subscription), running on this PC, the same way the `calendar-add` skill (§10a-1) already works. That's a materially different, more capable design, corrected here before M7/M8 are actually built against the wrong assumption.
 
 ```
-transcript ──▶ local LLM (Ollama) ──▶ JSON tool-call object
-                                            │
-                                            ▼
-                               zod schema validation
-                                            │
-                              ┌─────────────┴─────────────┐
-                          invalid                       valid
-                              │                             │
-                        reject, ask                whitelisted executor
-                        user to retry              (add_todo / create_event /
-                                                     move_event / etc. — a
-                                                     fixed, hand-written
-                                                     function per action)
+transcript
+     │
+     ▼
+headless Claude Code invocation, model=haiku
+  claude -p "<transcript>" --model haiku --mcp-config <our-calendar MCP config>
+  CLAUDE_CODE_OAUTH_TOKEN set (subscription billing — see below, NOT
+  ANTHROPIC_API_KEY, which is per-token API billing)
+     │
+     ├─ simple, unambiguous, no external facts needed
+     │  ("add milk to the list," "move Gavin's dentist to Friday")
+     │  → haiku calls the MCP tool directly. Fast, cheap — this is the
+     │    common case and should feel close to instant.
+     │
+     └─ needs real-world facts haiku can't reliably know
+        ("add all the Caps games in Tampa this season")
+        → haiku spawns a sonnet subagent (Claude Code's Agent/Task tool,
+          model override) scoped to research-and-report — same "never
+          guess verifiable facts, cross-check sources" rule §10a-1's
+          SKILL.md already encodes for calendar-add, not a second
+          implementation of that judgment call
+        → findings come back to haiku, which then calls the MCP tool(s)
+          to actually create the events
 ```
 
-- **LLM runtime:** Ollama running locally on the Windows PC (e.g. Llama 3.1 8B or Qwen2.5 7B instruct) — no cloud LLM call, matches "runs locally on my PC," reachable by the backend over `localhost` HTTP.
-- The system prompt constrains the model to a fixed set of named actions with a defined argument shape; the response is parsed as JSON and validated with `zod` **before anything touches the database**. Anything malformed or outside the whitelist is rejected, not "best-effort" executed.
-- Destructive or ambiguous actions (delete, move) get a **confirm step in the UI** ("Move Gavin's dentist appointment to Friday — confirm?") rather than silent execution — cheap insurance against a misheard transcript doing something wrong, and it keeps trust high for a nontechnical user.
-- Every voice command gets logged (`voice_commands` table: transcript, parsed action, accepted/rejected) — useful for debugging misfires without adding real infra.
+- **Why headless Claude Code, not Ollama:** a small local model can competently map "add milk to the list" to `add_todo`, but has no real way to go fetch and cross-check a sports schedule — it would confidently hallucinate one instead of admitting it doesn't know, which is a worse failure mode than not having the capability, on a calendar real people trust. Routing through Claude Code (haiku by default, sonnet on demand) removes that gap entirely rather than working around it.
+- **Billing:** `CLAUDE_CODE_OAUTH_TOKEN` (generated once via `claude setup-token`) is the documented mechanism for headless invocations billed against an existing Claude subscription rather than metered API usage. This is the whole point of the correction — don't lose the "on my subscription, not API" requirement by defaulting to `ANTHROPIC_API_KEY` (which Claude Code's `--bare` startup mode requires, and is real per-token billing) just because it's the more commonly-documented headless path.
+- **Real trade-off, stated plainly, not glossed over:** this is not actually local/offline processing — voice transcripts leave the house and go to Anthropic's servers, same trust model as everything else this project already does through Claude Code, but a genuine departure from the original "everything stays on my PC" framing. Also needs network + a valid (periodically-refreshed) OAuth token sitting on this machine to work at all — a fully local model would degrade more gracefully through an internet or auth outage. Worth being conscious of both before this is built, not discovered after.
+- **Two things to prototype before this is load-bearing, not yet verified:** (1) whether Claude Code's Agent/Task tool (needed for the haiku→sonnet research escalation) is available inside a headless `-p` invocation at all, vs. being interactive-session-only; (2) whether a spawned subagent inherits the parent's `--mcp-config` automatically (so it can call tools directly once research is done) or only the top-level invocation can touch tools, requiring results to be handed back up to haiku to actually execute. Neither blocks the design, but both change the concrete implementation shape.
+- **Safety model: batch-tag-and-undo, not a confirm-before-execute dialog.** The original plan gated destructive/ambiguous actions behind a UI confirmation step. With the action layer's batch-tagging mechanism generalized out of `calendar-add` (§10a-1) so *every* caller can opt into it — voice included — cheap, precise undo ("undo that") is available for anything created this way, which fits the "tap mic, say it, done" experience much better than a confirmation popup breaking the flow for the common, low-risk case. Still worth deciding per-action-type whether some things (e.g. deleting an existing event outright, not creating one) warrant a confirm step anyway — that's a judgment call for when M8 is actually being built, not resolved here.
+- Every voice command still gets logged (`voice_commands` table: transcript, which tier handled it — haiku-direct vs. haiku+sonnet-research — the resulting batch id if one was created, accepted/rejected) — useful for debugging misfires without adding real infra, and ties the audit trail to the same undo mechanism.
 
 ---
 
@@ -368,7 +379,7 @@ Requested capability: drive the app from Claude Code / any MCP-capable CLI ("add
 
 - §10's design already requires a validated, whitelisted set of actions (`add_todo`, `complete_todo`, `delete_todo`, `create_event`, `delete_event`, `move_event`, `list_events`, `list_todos`, …) with zod schemas, sitting behind the REST API. Building that as its own internal module (not scattered across Express route handlers) means it has exactly one home.
 - The MCP server is a thin wrapper: each MCP tool definition calls straight into that same action module — no duplicate validation logic, no second implementation to keep in sync.
-- When §10's local-LLM tool-calling layer gets built later, it becomes the *third* caller of that same module (REST API, MCP server, LLM executor). Building the MCP server now doesn't just deliver the CLI capability — it forces the action layer to exist as a clean, reusable module earlier than it otherwise would, which directly de-risks and speeds up M7.
+- §10's command layer (now that it's corrected to run through Claude Code rather than a local Ollama model — see §10) is this same MCP server's *third* caller, not a fourth implementation: the headless `claude -p` invocation is configured with `--mcp-config` pointing straight at this server, so a voice command and a typed Claude Code request end up calling the exact same tools. The `calendar-add` skill (§10a-1) is the fourth — same reasoning, different trigger.
 - **Transport:** stdio, not HTTP/SSE — Claude Code runs on the same Windows PC as the backend, so a local stdio MCP server (registered once via `claude mcp add`) is the simplest correct choice. No auth/networking concerns because it never leaves the machine. Remote MCP access (e.g. from a laptop that isn't this PC) is a real but separate future step (would need HTTP transport + auth) — not needed for "ask Claude Code from the CLI" on this machine.
 
 ### Implementation (M3 — done)
@@ -392,6 +403,24 @@ Registered and verified working (`claude mcp list` → `our-calendar ... ✔ Con
 It talks to whatever `backend/data/our-calendar.sqlite` currently holds (the real household DB, same file `npm run dev`'s backend uses), so it needs rebuilding (`npm run build`) after any `actions/` or `mcp/` change for the registered server to pick it up — there's no watch mode for the registered process. For iterating on the MCP server itself without rebuilding each time, run it directly instead: `npm run mcp` (`tsx src/mcp/server.ts`, from `backend/`).
 
 Verify it's registered/healthy with `claude mcp list`; inspect one server with `claude mcp get our-calendar`; remove with `claude mcp remove our-calendar -s user`.
+
+---
+
+## 10a-1. `calendar-add` Skill — safe batch creation from a directive (built directly, ahead of §10/M7-M8)
+
+Direct request, after watching how much research a single real ask ("add all the Buffalo Bills games this season") actually needed: a Claude Code skill that takes a directive, does its best to fulfill it — researching real facts from live sources rather than guessing when the directive references something verifiable — and creates the resulting events through the same action layer §10a already established as the one true entry point. Built ahead of §10 (voice) for the same reason the MCP server was built ahead of §10: it's a real, working preview of the same "directive → researched → action-layer calls" shape §10's command layer needs, de-risking that design before it's built against assumptions instead of evidence — see §10's own correction note for exactly what that evidence changed.
+
+**The actual point of this skill isn't the research step, it's the safety net.** "Do its best" implies it can get a directive wrong — misread scope, wrong assumption about which household member, a source that turns out stale. The answer isn't a confirm-before-execute dialog (there's no UI surface for a CLI-triggered skill to put one in) — it's making every batch **precisely, cheaply undoable after the fact**:
+
+- Every event created in one invocation shares a batch id, appended as a `[calendar-add:<batch-id>]` tag on each event's `description`.
+- A manifest recording the *exact* created event ids (not a title/date pattern to re-derive later) is written to `.claude/skills/calendar-add/runs/<batch-id>.json`.
+- Undoing calls `deleteEvent` on precisely those ids and archives the manifest (`.undone.json`, kept — not deleted, an audit trail of what was added and later reverted) — never a fuzzy re-match against what's currently in the calendar, which could easily catch something the household added separately around the same time.
+
+This tag-and-manifest mechanism is written generally enough that it isn't actually skill-specific — see §10's note on generalizing it into the action layer itself so voice-created events (and any future caller) get the same cheap, precise undo, not a second implementation of the same idea.
+
+**Implementation:** `.claude/skills/calendar-add/` — `SKILL.md` (the instructions an invocation follows: research-before-guessing rule, ambiguity defaults, workflow), `add-events.mjs` (takes a batch label + a JSON file of events matching `createEventSchema`, calls `createEvent` per event via the same import path the MCP server's design established as safe — direct local module import of `backend/dist/actions/events.js`, not a network call), `undo-events.mjs` (takes a batch id or `latest`, reverses exactly that batch). `runs/` is gitignored — it's real per-household data about what was added when, not something to version-control alongside the skill's code.
+
+**First real use:** the Bills' 2026 regular season schedule (16 games — the 18th week's date is officially TBD per NFL convention as of this writing, correctly skipped rather than guessed). Cross-checked against ESPN and the Bills' own site, which agreed exactly, before creating anything — exactly the standard the skill's own instructions require of any invocation.
 
 ---
 
@@ -481,11 +510,17 @@ CREATE TABLE sent_reminders (
   PRIMARY KEY (event_id, occurrence_start_at)
 );
 
--- v2
+-- v2 (§10) -- model_tier/batch_id added when §10's Ollama->Claude Code
+-- correction landed: which model actually handled the command, and the
+-- batch-tag id (shared with calendar-add, §10a-1) if this command
+-- created anything, so a logged command and its undo trail are the same
+-- lookup, not two.
 CREATE TABLE voice_commands (
   id             INTEGER PRIMARY KEY,
   transcript     TEXT NOT NULL,
+  model_tier     TEXT NOT NULL,    -- 'haiku' | 'haiku+sonnet-research'
   parsed_action  TEXT,             -- JSON
+  batch_id       TEXT,             -- NULL if nothing was created
   status         TEXT NOT NULL,    -- 'accepted' | 'rejected' | 'error'
   created_at     TEXT NOT NULL
 );
@@ -520,7 +555,7 @@ POST   /api/auth/login                                 { passcode } → sets ses
 GET    /api/health
 ```
 
-v2 adds `POST /api/voice/transcribe` and `POST /api/voice/command`. The MCP server (§10a) doesn't add HTTP routes — it calls the same underlying action module the REST handlers above call, over stdio instead of HTTP.
+v2 adds `POST /api/voice/transcribe` (Deepgram, §9) and `POST /api/voice/command` (spawns the headless Claude Code invocation described in §10, returns its result). Neither the MCP server (§10a) nor `calendar-add` (§10a-1) add HTTP routes — both call the same underlying action module the REST handlers above call, over stdio/direct import instead of HTTP; §10's command layer is a third caller of that same module via MCP, not a parallel implementation.
 
 ---
 
@@ -568,8 +603,9 @@ Each milestone is independently useful/testable — nothing requires the full ar
 
 **→ v1 complete here — daily-usable without anything below.**
 
-- **M7 (v2) — Voice input.** Mic button, MediaRecorder capture, Deepgram transcription endpoint.
-- **M8 (v2) — LLM command layer.** Ollama setup, system prompt, zod validation, confirm-before-execute UI — dispatches into the same action module M3's MCP server already built, not a parallel implementation.
+- **`calendar-add` skill. ✅ Done** (§10a-1), between M5 and M6. Direct request, prompted by a real "add all the Buffalo Bills games this season" ask that needed live research to fulfill correctly. `.claude/skills/calendar-add/` — researches verifiable facts from live sources rather than guessing, creates events through the same action layer as everything else, tags/manifests every batch for precise undo. Also functioned as a real, working preview of §10's "directive → researched → action-layer calls" shape, which directly fed the §10 correction below.
+- **M7 (v2) — Voice input.** Mic button, MediaRecorder capture, Deepgram transcription endpoint. Unaffected by M8's correction below — still exactly this.
+- **M8 (v2) — Command layer.** *Corrected from the original plan* (see §10's own note) — not Ollama; a headless Claude Code invocation (`claude -p`, `CLAUDE_CODE_OAUTH_TOKEN` for subscription billing, `--mcp-config` pointing at M3's MCP server) with haiku as the fast default and an on-demand sonnet research subagent for anything needing real-world facts, same judgment call `calendar-add` already encodes. Undo via the batch-tag mechanism generalized out of `calendar-add`, not a confirm-before-execute UI dialog. Two open questions flagged in §10 need prototyping before this is built for real: headless Agent/Task tool availability, and whether a spawned subagent inherits `--mcp-config`.
 - **M9 (v3+) — extras.** Weather, meal planning, grocery list, multiple to-do lists, todo due-date reminders (same mechanism as §8a, extended to todos), revisit Google Calendar sync *only* if a concrete need actually shows up (§7).
 
 ---
