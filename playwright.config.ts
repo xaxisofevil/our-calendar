@@ -1,7 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   E2E_AUTH_PASSCODE,
   E2E_AUTH_STATE_PATH,
+  E2E_CLAUDE_CODE_OAUTH_TOKEN,
   E2E_DEEPGRAM_API_KEY,
   E2E_REMINDER_SCAN_INTERVAL_MS,
   E2E_VAPID_PRIVATE_KEY,
@@ -28,6 +31,22 @@ const FRONTEND_PORT = 4173;
 // flip that config on and off mid-run.
 const DEEPGRAM_MOCK_PORT = 4402;
 const VOICE_UNCONFIGURED_BACKEND_PORT = 4403;
+
+// ARCHITECTURE.md §10/§12 (M8) — POST /api/voice/command spawns a headless
+// `claude` process (backend/src/lib/claudeCli.ts); there is no real
+// CLAUDE_CODE_OAUTH_TOKEN available yet, and a real invocation would be
+// slow/nondeterministic/costly regardless (same reasoning as §9's Deepgram
+// mock). CLAUDE_CLI_COMMAND/CLAUDE_CLI_ARGS_PREFIX (claudeCli.ts's own
+// test/dev override levers) point the primary e2e backend at
+// e2e/mock-claude-cli.mjs instead of the real `claude` binary — run via
+// `node <script>` since a Windows child process can't execute a `.mjs`
+// file directly the way it can a real installed CLI's own exe/shim.
+// `process.execPath` (this very playwright.config.ts process's own node
+// binary) rather than a bare "node", since bare "node" isn't guaranteed to
+// be on the primary backend child process's PATH the way it is on
+// whichever PATH launched this config file.
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+const mockClaudeCliPath = path.join(configDir, "e2e", "mock-claude-cli.mjs");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -90,6 +109,12 @@ export default defineConfig({
         REMINDER_SCAN_INTERVAL_MS: String(E2E_REMINDER_SCAN_INTERVAL_MS),
         DEEPGRAM_API_KEY: E2E_DEEPGRAM_API_KEY,
         DEEPGRAM_API_URL: `http://localhost:${DEEPGRAM_MOCK_PORT}/v1/listen`,
+        // ARCHITECTURE.md §10/§12 (M8): a fake token (only its presence is
+        // checked — see claudeCli.ts's ClaudeCliConfigError), and the real
+        // `claude` binary swapped for the local mock script above.
+        CLAUDE_CODE_OAUTH_TOKEN: E2E_CLAUDE_CODE_OAUTH_TOKEN,
+        CLAUDE_CLI_COMMAND: process.execPath,
+        CLAUDE_CLI_ARGS_PREFIX: mockClaudeCliPath,
       },
       reuseExistingServer: false,
       timeout: 30_000,

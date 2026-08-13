@@ -1,15 +1,35 @@
 import { useCallback, useRef, useState } from "react";
-import { transcribeVoice } from "./api";
+import { confirmVoiceAction, runVoiceCommand, transcribeVoice, undoVoiceBatch } from "./api";
+import type { VoiceCommandResult } from "../types";
 
-export type VoiceCaptureStatus = "idle" | "recording" | "uploading" | "done" | "error";
+export type VoiceCaptureStatus = "idle" | "recording" | "uploading" | "commanding" | "done" | "error";
 
 interface VoiceCaptureState {
   status: VoiceCaptureStatus;
   transcript: string | null;
   errorMessage: string | null;
+  // ARCHITECTURE.md §10/§12 (M8) — the result of actually acting on the
+  // transcript (POST /api/voice/command), once §9's transcription step has
+  // produced a non-empty transcript. Null for the whole §9-only "didn't
+  // catch that"/empty-transcript case, which never calls the command layer
+  // at all (see finishRecording below).
+  commandResult: VoiceCommandResult | null;
+  // Feedback from a follow-up action on an already-shown result (Confirm/
+  // Cancel/Undo) — kept separate from errorMessage/commandResult so
+  // e.g. "Undone." can replace the toast's body without pretending a new
+  // voice command just ran.
+  actionNote: string | null;
+  actionBusy: boolean;
 }
 
-const IDLE_STATE: VoiceCaptureState = { status: "idle", transcript: null, errorMessage: null };
+const IDLE_STATE: VoiceCaptureState = {
+  status: "idle",
+  transcript: null,
+  errorMessage: null,
+  commandResult: null,
+  actionNote: null,
+  actionBusy: false,
+};
 
 const UNSUPPORTED_MESSAGE = "Voice input isn't available on this browser.";
 const MIC_DENIED_MESSAGE = "Microphone access was blocked — allow it for this site in your browser settings to use voice.";
@@ -28,33 +48,32 @@ function isVoiceCaptureSupported(): boolean {
 }
 
 /**
- * ARCHITECTURE.md §9 (M7) — push-to-talk capture: `start()` requests the
- * mic and begins a `MediaRecorder` recording, `stop()` ends it and uploads
- * the single resulting blob to `POST /api/voice/transcribe`
- * (lib/api.ts's `transcribeVoice`). Displays the transcript as-is — §9's
- * scope is capture + transcription only, nothing from §10 (the command
- * layer that would act on it) is built or stubbed here.
+ * ARCHITECTURE.md §9/§10 (M7/M8) — push-to-talk capture (`start()`/
+ * `stop()`, unchanged from §9) plus acting on the result: once
+ * `POST /api/voice/transcribe` returns a non-empty transcript, this now
+ * goes on to call `POST /api/voice/command` (lib/api.ts's
+ * `runVoiceCommand`) itself, rather than just displaying the transcript
+ * (§9's original, deliberately-stopped-short scope). An empty transcript
+ * (Deepgram genuinely heard nothing) still short-circuits to the plain
+ * "didn't catch that" display exactly as before — there's nothing for the
+ * command layer to act on.
  *
- * Press-and-hold, not tap-to-toggle: VoiceButton.tsx calls `start()`/
- * `stop()` from pointerdown/pointerup. §9's own spec wording ("uploaded ...
- * on release") already settles this as a walkie-talkie-style hold, which
- * also can't be left accidentally recording forever if a tap is ever missed
- * on a kitchen tablet — releasing (or the pointer leaving the button, or
- * the gesture being cancelled) always ends the recording.
- *
- * `stop()` can be called before `start()`'s `getUserMedia()` prompt has
- * resolved (a fast tap on the very first use, while the browser's own
- * permission dialog is still up) — `pendingStopRef` remembers that request
- * and applies it the instant recording actually begins, rather than leaving
- * the mic recording indefinitely because the release event had nowhere to
- * land yet.
+ * `confirmAction`/`cancelAction`/`undoBatch` handle the two follow-up
+ * flows `commandResult` can leave outstanding: a `needs_confirmation`
+ * outcome (Confirm actually executes the proposed destructive action via
+ * POST /api/voice/confirm — no LLM involved, see that route's own
+ * comment; Cancel just discards it client-side, nothing to tell the
+ * server) or an `executed` outcome (Undo reverses the whole batch via
+ * POST /api/voice/undo). No auto-listening / voice-driven confirmation
+ * here on purpose — that's explicitly a follow-up piece of work layered on
+ * top of this, not part of this pass.
  */
 export function useVoiceCapture() {
   const [state, setState] = useState<VoiceCaptureState>(IDLE_STATE);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const activeRef = useRef(false); // true from the moment start() is called until upload settles
+  const activeRef = useRef(false); // true from the moment start() is called until upload+command settle
   const pendingStopRef = useRef(false);
 
   const releaseStream = useCallback(() => {
@@ -62,48 +81,71 @@ export function useVoiceCapture() {
     streamRef.current = null;
   }, []);
 
-  const finishRecording = useCallback((recorder: MediaRecorder) => {
-    recorder.onstop = () => {
-      releaseStream();
-      recorderRef.current = null;
+  const finishRecording = useCallback(
+    (recorder: MediaRecorder) => {
+      recorder.onstop = () => {
+        releaseStream();
+        recorderRef.current = null;
 
-      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-      chunksRef.current = [];
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        chunksRef.current = [];
 
-      if (blob.size === 0) {
-        activeRef.current = false;
-        setState({ status: "error", transcript: null, errorMessage: NO_AUDIO_CAPTURED_MESSAGE });
-        return;
-      }
-
-      setState({ status: "uploading", transcript: null, errorMessage: null });
-      transcribeVoice(blob)
-        .then(({ transcript }) => {
+        if (blob.size === 0) {
           activeRef.current = false;
-          setState({ status: "done", transcript, errorMessage: null });
-        })
-        .catch((err: unknown) => {
-          activeRef.current = false;
-          setState({
-            status: "error",
-            transcript: null,
-            errorMessage: err instanceof Error ? err.message : GENERIC_MESSAGE,
+          setState({ ...IDLE_STATE, status: "error", errorMessage: NO_AUDIO_CAPTURED_MESSAGE });
+          return;
+        }
+
+        setState({ ...IDLE_STATE, status: "uploading" });
+        transcribeVoice(blob)
+          .then(async ({ transcript }) => {
+            if (!transcript.trim()) {
+              // §9's original "didn't catch that" case — nothing for the
+              // command layer to act on.
+              activeRef.current = false;
+              setState({ ...IDLE_STATE, status: "done", transcript });
+              return;
+            }
+
+            setState({ ...IDLE_STATE, status: "commanding", transcript });
+            try {
+              const commandResult = await runVoiceCommand(transcript);
+              activeRef.current = false;
+              setState({ ...IDLE_STATE, status: "done", transcript, commandResult });
+            } catch (err) {
+              activeRef.current = false;
+              setState({
+                ...IDLE_STATE,
+                status: "error",
+                transcript,
+                errorMessage: err instanceof Error ? err.message : GENERIC_MESSAGE,
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            activeRef.current = false;
+            setState({
+              ...IDLE_STATE,
+              status: "error",
+              errorMessage: err instanceof Error ? err.message : GENERIC_MESSAGE,
+            });
           });
-        });
-    };
-    recorder.stop();
-  }, [releaseStream]);
+      };
+      recorder.stop();
+    },
+    [releaseStream],
+  );
 
   const start = useCallback(async () => {
     if (!isVoiceCaptureSupported()) {
-      setState({ status: "error", transcript: null, errorMessage: UNSUPPORTED_MESSAGE });
+      setState({ ...IDLE_STATE, status: "error", errorMessage: UNSUPPORTED_MESSAGE });
       return;
     }
-    if (activeRef.current) return; // already recording/uploading — a stray duplicate press
+    if (activeRef.current) return; // already recording/uploading/commanding — a stray duplicate press
 
     activeRef.current = true;
     pendingStopRef.current = false;
-    setState({ status: "recording", transcript: null, errorMessage: null });
+    setState({ ...IDLE_STATE, status: "recording" });
 
     let stream: MediaStream;
     try {
@@ -117,7 +159,7 @@ export function useVoiceCapture() {
           : name === "NotFoundError"
             ? NO_MIC_MESSAGE
             : GENERIC_MESSAGE;
-      setState({ status: "error", transcript: null, errorMessage: message });
+      setState({ ...IDLE_STATE, status: "error", errorMessage: message });
       return;
     }
 
@@ -156,5 +198,50 @@ export function useVoiceCapture() {
     setState(IDLE_STATE);
   }, []);
 
-  return { ...state, start, stop, reset, supported: isVoiceCaptureSupported() };
+  const confirmAction = useCallback(async () => {
+    const action = state.commandResult?.proposedAction;
+    if (!action) return;
+    setState((s) => ({ ...s, actionBusy: true }));
+    try {
+      await confirmVoiceAction(action);
+      setState((s) => ({ ...s, actionBusy: false, actionNote: "Done — that's been applied.", commandResult: null }));
+    } catch (err) {
+      setState((s) => ({
+        ...s,
+        actionBusy: false,
+        actionNote: err instanceof Error ? err.message : GENERIC_MESSAGE,
+      }));
+    }
+  }, [state.commandResult]);
+
+  const cancelAction = useCallback(() => {
+    setState((s) => ({ ...s, commandResult: null, actionNote: "Cancelled — nothing was changed." }));
+  }, []);
+
+  const undoBatch = useCallback(async () => {
+    const batchId = state.commandResult?.batchId;
+    if (!batchId) return;
+    setState((s) => ({ ...s, actionBusy: true }));
+    try {
+      await undoVoiceBatch(batchId);
+      setState((s) => ({ ...s, actionBusy: false, actionNote: "Undone.", commandResult: null }));
+    } catch (err) {
+      setState((s) => ({
+        ...s,
+        actionBusy: false,
+        actionNote: err instanceof Error ? err.message : GENERIC_MESSAGE,
+      }));
+    }
+  }, [state.commandResult]);
+
+  return {
+    ...state,
+    start,
+    stop,
+    reset,
+    confirmAction,
+    cancelAction,
+    undoBatch,
+    supported: isVoiceCaptureSupported(),
+  };
 }

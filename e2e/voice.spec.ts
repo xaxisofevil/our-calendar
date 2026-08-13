@@ -27,9 +27,16 @@ import { test, expect } from "@playwright/test";
 //    round-trip, mic permission denied, no MediaRecorder support, and an
 //    upload/network failure.
 //
-// Nothing here executes a command from a transcript — that's §10's command
-// layer, explicitly out of scope for §9/M7 (see ARCHITECTURE.md). The
-// transcript is only ever displayed, never acted on.
+// Now that §10/M8 is built, a non-empty transcript is no longer just
+// displayed — useVoiceCapture goes on to call POST /api/voice/command
+// itself (see e2e/voice-command.spec.ts for that endpoint's own dedicated
+// coverage, against the same e2e/mock-claude-cli.mjs stand-in this suite's
+// primary backend is already configured to use). The successful
+// round-trip test below picks a fake transcript that mock-claude-cli.mjs
+// recognizes, so its assertion is "the full capture -> transcribe -> act
+// pipeline shows a real result", not just "the raw transcript text got
+// echoed back" (which was §9's original, narrower scope, before M8
+// existed).
 
 const VOICE_UNCONFIGURED_BASE = "http://localhost:4403";
 
@@ -190,8 +197,12 @@ test.describe("Push-to-talk voice button (UI)", () => {
     await page.mouse.up();
   }
 
-  test("a full press-and-hold round trip shows the real transcript", async ({ page }) => {
-    await mockWorkingMic(page, "add milk to the list");
+  test("a full press-and-hold round trip transcribes and acts on the result", async ({ page }) => {
+    // "MOCK_ADD_TODO" is a trigger e2e/mock-claude-cli.mjs recognizes
+    // (see e2e/voice-command.spec.ts) — picked here specifically so this
+    // test can assert on a real, deterministic end-to-end outcome (a todo
+    // actually created) rather than just the intermediate transcript text.
+    await mockWorkingMic(page, "MOCK_ADD_TODO please, full round trip test");
     await page.goto("/");
 
     const [uploadResponse] = await Promise.all([
@@ -202,7 +213,7 @@ test.describe("Push-to-talk voice button (UI)", () => {
     ]);
     expect(uploadResponse.status()).toBe(200);
 
-    await expect(page.getByText(/Heard: .add milk to the list./)).toBeVisible();
+    await expect(page.getByText(/Added 'Buy milk \(voice test\)' to the to-do list\./)).toBeVisible();
   });
 
   test("microphone permission denied shows a clear, non-technical message", async ({ page }) => {

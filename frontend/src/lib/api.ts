@@ -3,11 +3,14 @@ import type {
   CreateTodoInput,
   EventRecord,
   PersonRecord,
+  ProposedDestructiveAction,
   PushSubscriptionRecord,
   SubscribePushInput,
   TodoRecord,
+  UndoBatchResult,
   UpdateEventInput,
   UpdateTodoInput,
+  VoiceCommandResult,
 } from "../types";
 import { notifyUnauthorized } from "./auth";
 
@@ -119,4 +122,59 @@ export async function transcribeVoice(blob: Blob): Promise<{ transcript: string 
     throw new Error(typeof body?.error === "string" ? body.error : "Couldn't transcribe that — please try again.");
   }
   return res.json() as Promise<{ transcript: string }>;
+}
+
+// ARCHITECTURE.md §10/§12 (M8) — takes a transcript (from transcribeVoice
+// above) and actually acts on it. Not built on request() for the same
+// reason transcribeVoice above isn't: POST /api/voice/command's one
+// non-200 case (CLAUDE_CODE_OAUTH_TOKEN missing) returns a plain string in
+// `error` (routes/voice.ts mirrors DeepgramConfigError's handling exactly),
+// which request()'s error path would double-quote via JSON.stringify()
+// the same way it would for /transcribe's errors. Every other outcome —
+// including a failed voice command — is still a normal 200 with a
+// `VoiceCommandResult` body (see lib/voiceCommand.ts's own comment on why
+// a per-command failure is a value, not a thrown exception), so this
+// function's return type is just that result, not something wrapped for
+// error-vs-success branching the way most of this app's mutations are.
+export async function runVoiceCommand(transcript: string): Promise<VoiceCommandResult> {
+  let res: Response;
+  try {
+    res = await fetch("/api/voice/command", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript }),
+    });
+  } catch {
+    throw new Error("Couldn't reach the server — check your connection and try again.");
+  }
+
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(
+      typeof body?.error === "string" ? body.error : "Couldn't run that voice command — please try again.",
+    );
+  }
+  return body as VoiceCommandResult;
+}
+
+// ARCHITECTURE.md §10/§12 (M8) — executes a previously-proposed destructive
+// action. `action` is echoed back exactly as the server returned it in
+// `VoiceCommandResult.proposedAction` (routes/voice.ts's stateless-confirm
+// design — see that file's own comment on why); this is a plain
+// request()-shaped mutation like any other in this app (400/404 bodies
+// follow the same shapes updateEvent/deleteEvent's own REST routes already
+// do, so friendlyErrorMessage handles them without anything voice-specific).
+export function confirmVoiceAction(action: ProposedDestructiveAction): Promise<{ outcome: "executed" }> {
+  return request("/api/voice/confirm", { method: "POST", body: JSON.stringify(action) });
+}
+
+// ARCHITECTURE.md §10a-2/§10/§12 (M8) — undoes everything a given voice
+// command created (actions/batches.ts's `undoBatch`, exposed here as
+// §10a-2's own deferred "not built here, and left for §10/M8" HTTP surface).
+export function undoVoiceBatch(batchId: string): Promise<UndoBatchResult> {
+  return request("/api/voice/undo", { method: "POST", body: JSON.stringify({ batchId }) });
 }

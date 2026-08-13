@@ -90,3 +90,34 @@ export function countPushSubscriptions(endpoint: string): number {
     db.close();
   }
 }
+
+interface VoiceCommandRow {
+  id: number;
+  transcript: string;
+  model_tier: string;
+  parsed_action: string | null;
+  batch_id: string | null;
+  status: string;
+  created_at: string;
+}
+
+/**
+ * ARCHITECTURE.md §10/§12 (M8) — voice_commands has no GET route (same
+ * "no HTTP surface for something only a test needs to read back" reasoning
+ * as push_subscriptions/sent_reminders above), so voice-command.spec.ts
+ * asserts on it the same way: straight out of the isolated e2e SQLite
+ * file, read-only. Returns the most recent row for a given transcript
+ * (rather than requiring the caller to know an id) since that's the only
+ * thing a test naturally has in hand right after calling
+ * POST /api/voice/command.
+ */
+export function latestVoiceCommand(transcript: string): VoiceCommandRow | undefined {
+  const db = openE2eDb();
+  try {
+    return db
+      .prepare("SELECT * FROM voice_commands WHERE transcript = ? ORDER BY id DESC LIMIT 1")
+      .get(transcript) as VoiceCommandRow | undefined;
+  } finally {
+    db.close();
+  }
+}
