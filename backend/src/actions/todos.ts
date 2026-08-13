@@ -3,6 +3,7 @@ import { db, sqlite } from "../db/client.js";
 import { todos } from "../db/schema.js";
 import { createTodoSchema, updateTodoSchema } from "../lib/validation.js";
 import { broadcast } from "../lib/sse.js";
+import { appendBatchTag } from "../lib/batchTag.js";
 import { ActionNotFoundError, ActionValidationError } from "./errors.js";
 
 // Shared action layer (ARCHITECTURE.md §10a) — the one home for todo CRUD
@@ -19,6 +20,9 @@ export interface TodoDTO {
   completed: boolean;
   list: string;
   position: number;
+  // See ARCHITECTURE.md's batch-undo subsection / actions/batches.ts. NULL
+  // for anything created the normal way (REST/MCP callers never set this).
+  batchId: string | null;
 }
 
 function serializeTodo(row: TodoRow): TodoDTO {
@@ -30,6 +34,7 @@ function serializeTodo(row: TodoRow): TodoDTO {
     completed: Boolean(row.completed),
     list: row.list,
     position: row.position,
+    batchId: row.batchId ?? null,
   };
 }
 
@@ -38,8 +43,14 @@ export function listTodos(): TodoDTO[] {
   return rows.map(serializeTodo);
 }
 
-/** Validates with `createTodoSchema` and throws `ActionValidationError` on failure. */
-export function addTodo(input: unknown): TodoDTO {
+/**
+ * Validates with `createTodoSchema` and throws `ActionValidationError` on
+ * failure. `batchId` is a separate parameter, not part of the validated
+ * input — same reasoning as `createEvent`'s `batchId` param (see its own
+ * comment): a trusted value minted by the caller via `actions/batches.ts`,
+ * never something a REST body should set directly.
+ */
+export function addTodo(input: unknown, batchId?: string | null): TodoDTO {
   const parsed = createTodoSchema.safeParse(input);
   if (!parsed.success) throw new ActionValidationError(parsed.error);
 
@@ -51,11 +62,12 @@ export function addTodo(input: unknown): TodoDTO {
     .insert(todos)
     .values({
       text: parsed.data.text,
-      notes: parsed.data.notes ?? null,
+      notes: appendBatchTag(parsed.data.notes ?? null, batchId),
       dueAt: parsed.data.dueAt ?? null,
       list: parsed.data.list ?? "household",
       completed: false,
       position: nextPosition,
+      batchId: batchId ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -101,6 +113,16 @@ export function updateTodo(id: number, input: unknown): TodoDTO {
  */
 export function completeTodo(id: number): TodoDTO {
   return updateTodo(id, { completed: true });
+}
+
+/**
+ * Every todo tagged with a given batch id — `actions/batches.ts`'s
+ * `undoBatch` uses this, same "one home for this logic" reasoning as
+ * `listEventsByBatch`.
+ */
+export function listTodosByBatch(batchId: string): TodoDTO[] {
+  const rows = db.select().from(todos).where(eq(todos.batchId, batchId)).all();
+  return rows.map(serializeTodo);
 }
 
 /** Throws `ActionNotFoundError` if `id` doesn't exist. */

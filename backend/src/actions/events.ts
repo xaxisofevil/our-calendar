@@ -4,6 +4,7 @@ import { events } from "../db/schema.js";
 import { createEventSchema, updateEventSchema } from "../lib/validation.js";
 import { expandOccurrences } from "../lib/recurrence.js";
 import { broadcast } from "../lib/sse.js";
+import { appendBatchTag } from "../lib/batchTag.js";
 import { ActionNotFoundError, ActionValidationError } from "./errors.js";
 
 // Shared action layer (ARCHITECTURE.md §10a) — the one home for event CRUD
@@ -24,6 +25,9 @@ export interface EventDTO {
   endAt: string;
   allDay: boolean;
   recurrenceRule: string | null;
+  // See ARCHITECTURE.md's batch-undo subsection / actions/batches.ts. NULL
+  // for anything created the normal way (REST/MCP callers never set this).
+  batchId: string | null;
 }
 
 function serializeEvent(row: EventRow): EventDTO {
@@ -37,6 +41,7 @@ function serializeEvent(row: EventRow): EventDTO {
     endAt: row.endAt,
     allDay: Boolean(row.allDay),
     recurrenceRule: row.recurrenceRule ?? null,
+    batchId: row.batchId ?? null,
   };
 }
 
@@ -119,8 +124,20 @@ export function listEvents(range?: ListEventsRange): EventDTO[] {
   return listEventsBetween(rangeStart, rangeEnd);
 }
 
-/** Validates with `createEventSchema` and throws `ActionValidationError` on failure. */
-export function createEvent(input: unknown): EventDTO {
+/**
+ * Validates with `createEventSchema` and throws `ActionValidationError` on
+ * failure. `batchId` is a separate parameter, not part of the validated
+ * input object — deliberately: it's a trusted value a caller mints via
+ * `actions/batches.ts`'s `mintBatchId()`, never something an HTTP request
+ * body should be able to set directly (REST's `routes/events.ts` calls
+ * `createEvent(req.body)` with one argument, same as before this existed,
+ * so ordinary event creation is completely unaffected). When set, it's
+ * stored in the indexed `batch_id` column (the real undo mechanism — see
+ * `undoBatch`) and also appended as a `[batch:<id>]` trace to the
+ * description (see `lib/batchTag.ts` for why that's just a visible-
+ * provenance nicety and not itself load-bearing).
+ */
+export function createEvent(input: unknown, batchId?: string | null): EventDTO {
   const parsed = createEventSchema.safeParse(input);
   if (!parsed.success) throw new ActionValidationError(parsed.error);
 
@@ -129,13 +146,14 @@ export function createEvent(input: unknown): EventDTO {
     .insert(events)
     .values({
       title: parsed.data.title,
-      description: parsed.data.description ?? null,
+      description: appendBatchTag(parsed.data.description ?? null, batchId),
       location: parsed.data.location ?? null,
       startAt: parsed.data.startAt,
       endAt: parsed.data.endAt,
       allDay: parsed.data.allDay,
       personId: parsed.data.personId ?? null,
       recurrenceRule: parsed.data.recurrenceRule ?? null,
+      batchId: batchId ?? null,
       updatedAt: now,
     })
     .run();
@@ -170,6 +188,20 @@ export function updateEvent(id: number, input: unknown): EventDTO {
   const row = db.select().from(events).where(eq(events.id, id)).get();
   broadcast("events:changed");
   return serializeEvent(row!);
+}
+
+/**
+ * Every event tagged with a given batch id (`actions/batches.ts`'s
+ * `undoBatch` uses this, so it never has to hand-write the same
+ * `where(eq(events.batchId, ...))` select itself — one query
+ * implementation, same "one home for this logic" reasoning as everywhere
+ * else in this module). Recurring master rows are returned as-is,
+ * unexpanded — a batch-created recurring event's master row is what
+ * `deleteEvent` needs to target, not its read-time-expanded occurrences.
+ */
+export function listEventsByBatch(batchId: string): EventDTO[] {
+  const rows = db.select().from(events).where(eq(events.batchId, batchId)).all();
+  return rows.map(serializeEvent);
 }
 
 /**

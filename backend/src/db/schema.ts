@@ -15,6 +15,14 @@ export const todos = sqliteTable("todos", {
   completed: integer("completed", { mode: "boolean" }).notNull().default(false),
   list: text("list").notNull().default("household"),
   position: integer("position").notNull(),
+  // Nullable batch-tag id (backend/src/actions/batches.ts, generalized out
+  // of the calendar-add skill — see ARCHITECTURE.md §10a-1's "generalizing"
+  // note and the new batch-undo subsection). NULL for anything created the
+  // normal way (the REST UI never sets this); set only by callers that mint
+  // a batch id up front (calendar-add, and eventually §10's voice layer) so
+  // everything created in one invocation can be found and undone precisely
+  // via `undoBatch`, without parsing free text back out of `notes`.
+  batchId: text("batch_id"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -55,6 +63,11 @@ export const events = sqliteTable("events", {
   // the "master" event; occurrences are computed at read time, never
   // materialized as rows (see routes/events.ts GET handler).
   recurrenceRule: text("recurrence_rule"),
+  // See todos.batchId's comment above — same mechanism, same reasoning,
+  // shared by both tables so a single batch id can span events and todos
+  // created in one invocation (e.g. "add the game to the calendar and put
+  // tickets on the to-do list").
+  batchId: text("batch_id"),
   updatedAt: text("updated_at").notNull(),
 });
 

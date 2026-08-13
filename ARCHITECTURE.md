@@ -483,6 +483,26 @@ This tag-and-manifest mechanism is written generally enough that it isn't actual
 
 ---
 
+## 10a-2. Batch-tag-and-undo, generalized into the action layer (ahead of §10/M8)
+
+`calendar-add`'s tag-and-manifest mechanism (§10a-1) worked, but it was built as a standalone script's own private convention — a description string tag plus a JSON manifest file on disk. §10's design (the "safety model" bullet) already commits to reusing this same idea for the voice command layer, so it needed to exist as a real, shared action-layer primitive before M8 could be built against it, the same reasoning that pulled the MCP server (§10a) forward ahead of voice.
+
+**What changed from calendar-add's original approach, and why:**
+
+- **A real `batch_id` column** (nullable, indexed) on both `events` and `todos` — not a tag embedded in `description`/`notes` that has to be regex/string-matched back out to find "everything in this batch." `undoBatch(batchId)` (`backend/src/actions/batches.ts`) just selects `WHERE batch_id = ?` against the tables that are already the source of truth. This also means a batch can span both tables in one id (a future "add the game to the calendar and put tickets on the to-do list" voice command doesn't need two separate undo mechanisms), which calendar-add's events-only manifest never had to handle.
+- **No separate manifest file.** calendar-add's `runs/<batch-id>.json` exists because a standalone script has nowhere else durable to record "which ids did I just create" — but inside the action layer, the row *is* that record; a second file that could drift from the database (e.g. if a row is later hand-edited or the process crashes mid-batch) is a liability, not a feature, once there's a real column to query instead.
+- **The human-readable trace is kept, but demoted to cosmetic.** calendar-add's `[calendar-add:<id>]` description tag genuinely earned its keep — it's the only way a household member looking at an event today can tell "why is this here." `createEvent`/`addTodo` still append an equivalent `[batch:<id>]` trace (`lib/batchTag.ts`'s `appendBatchTag`, to `description`/`notes` respectively) whenever a `batchId` is passed, so that value isn't lost. The difference: `undoBatch` never reads this string back — it's purely for a human glancing at the row, not part of how undo finds anything. This is the opposite dependency direction from calendar-add's original design, and it's what makes undo robust against someone hand-editing an event's description later (that no longer breaks undo the way stripping/mangling the old tag would have against a string-match approach).
+
+**Where it lives:** `backend/src/actions/batches.ts` — `mintBatchId(label?)` (a `crypto.randomUUID()`, optionally slug-prefixed with a caller-given label for readability in logs/traces) and `undoBatch(batchId)`. `createEvent`/`addTodo` (`actions/events.ts`/`actions/todos.ts`) both gained an **optional second `batchId` parameter** — deliberately not a field on the existing zod input schemas (`createEventSchema`/`createTodoSchema`), since those schemas double as the REST request-body validator and an HTTP caller should never be able to set its own `batch_id` directly. `routes/events.ts`/`routes/todos.ts` still call `createEvent(req.body)`/`addTodo(req.body)` exactly as before (one argument) — ordinary household-created events/todos are completely unaffected; `batch_id` is only ever set by a trusted in-process caller that minted one itself. `undoBatch` deletes via the real `deleteEvent`/`deleteTodo` actions, one row at a time — never a raw `DELETE ... WHERE batch_id = ?` — specifically so every side effect those two functions already own (the `broadcast("events:changed")`/`broadcast("todos:changed")` SSE calls that keep every other connected device live-synced, §3; `sent_reminders`' `ON DELETE CASCADE`, §11) fires exactly the same way a manual delete would, and automatically keeps firing correctly if those functions ever grow another side effect later — undo doesn't need a matching update to stay correct. Undoing an unknown or already-undone batch id is a graceful no-op (`{ deletedEvents: 0, deletedTodos: 0 }`), not a thrown error — a caller (voice, a retried request, a household member saying "undo" twice) can't always know in advance whether an id is still active.
+
+**`calendar-add` itself was deliberately left alone**, not migrated to call this. It already works, is already tested (real production use — see §10a-1's "First real use"), and migrating it buys consistency, not correctness — its manifest-file approach isn't broken, it's just no longer how a *new* caller should be built. Revisiting that migration later (once the voice layer has exercised this primitive for real) is a reasonable future cleanup, but not before then; there's no value in touching working, tested code purely for symmetry ahead of an actual need.
+
+**Not built here, and left for §10/M8:** any REST route or MCP tool exposing `mintBatchId`/`undoBatch` to an outside caller. This pass is intentionally action-layer-only, matching how the MCP server (§10a) itself was built one layer beneath its eventual callers first. Whoever builds M8's `POST /api/voice/command` endpoint should: mint one batch id per accepted voice command up front, thread it through every `createEvent`/`addTodo` call that command makes, and record it on the corresponding `voice_commands.batch_id` row (§11) — `getBatch(batchId)` (also in `actions/batches.ts`) returns everything currently tagged with an id across both tables, which is exactly the shape needed to answer "what would 'undo that' remove" for a confirmation UI without a second query implementation.
+
+**Testing:** `backend/vitest.config.ts` + `backend/src/actions/batches.test.ts` — the first Vitest unit tests in this repo (§13 had called for Vitest "for the things that are actually easy to get subtly wrong," but nothing had actually installed it before now). Unit-level, not Playwright e2e, because `batchId`/`undoBatch` have no HTTP surface yet for a browser-driven e2e test to reach through (that's exactly what's deferred to M8, above) — the same reason `e2e/db.ts` already reads `push_subscriptions`/`sent_reminders` straight out of the isolated SQLite file rather than through a route that deliberately doesn't exist (§8a/§12). Isolated via its own throwaway `DB_DIR_NAME` (a fresh `data-vitest-<uuid>` directory per run, cleaned up in `afterAll`) — never `data/` (real) or `data-e2e/` (Playwright's). Covers: `createEvent`/`addTodo` storing `batch_id` and appending the `[batch:<id>]` trace; ordinary single-argument calls (how every existing REST route already calls these) staying completely unaffected; `undoBatch` removing exactly one batch's rows across both tables and leaving a second batch and untagged rows untouched; undoing a nonexistent batch id and undoing the same batch twice both being graceful no-ops; and — using the real `lib/sse.ts` with a fake client `Response` capturing writes, not a mock — that `undoBatch` fires one real `events:changed`/`todos:changed` broadcast per deleted row, proving it goes through `deleteEvent`/`deleteTodo` rather than bypassing them. The browser-side half of that same broadcast guarantee (a live tab actually refetching on signal) is already covered for `deleteEvent`/`deleteTodo` by the existing `e2e/live-sync.spec.ts`, which this reuses rather than duplicates.
+
+---
+
 ## 11. Database Schema (v1 + forward-compatible fields for v2)
 
 ```sql
@@ -494,6 +514,7 @@ CREATE TABLE todos (
   completed     INTEGER NOT NULL DEFAULT 0,
   list          TEXT NOT NULL DEFAULT 'household',
   position      INTEGER NOT NULL,
+  batch_id      TEXT,                       -- nullable, indexed; §10a-2's batch-tag-and-undo primitive
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL
 );
@@ -516,6 +537,7 @@ CREATE TABLE events (
   end_at             TEXT NOT NULL,
   all_day            INTEGER NOT NULL DEFAULT 0,
   recurrence_rule    TEXT,            -- RFC 5545 RRULE string, NULL for non-recurring events; see §7a
+  batch_id           TEXT,            -- nullable, indexed; §10a-2's batch-tag-and-undo primitive
   updated_at         TEXT NOT NULL,
   google_account_id  INTEGER,         -- reserved, unused — see §7's "reversed decision"
   google_event_id    TEXT,            -- reserved, unused — see §7's "reversed decision"
@@ -569,11 +591,13 @@ CREATE TABLE sent_reminders (
   PRIMARY KEY (event_id, occurrence_start_at)
 );
 
--- v2 (§10) -- model_tier/batch_id added when §10's Ollama->Claude Code
--- correction landed: which model actually handled the command, and the
--- batch-tag id (shared with calendar-add, §10a-1) if this command
--- created anything, so a logged command and its undo trail are the same
--- lookup, not two.
+-- v2 (§10) -- not built yet (see §10a-2's "Not built here, and left for
+-- §10/M8" note). model_tier/batch_id were added when §10's Ollama->Claude
+-- Code correction landed: which model actually handled the command, and
+-- the batch id (§10a-2's real batch_id column mechanism, generalized out
+-- of calendar-add, §10a-1) if this command created anything, so a logged
+-- command and its undo trail are the same lookup, not two -- undoing a
+-- voice command means calling undoBatch(voice_commands.batch_id).
 CREATE TABLE voice_commands (
   id             INTEGER PRIMARY KEY,
   transcript     TEXT NOT NULL,
@@ -664,7 +688,8 @@ Each milestone is independently useful/testable — nothing requires the full ar
 
 - **`calendar-add` skill. ✅ Done** (§10a-1), between M5 and M6. Direct request, prompted by a real "add all the Buffalo Bills games this season" ask that needed live research to fulfill correctly. `.claude/skills/calendar-add/` — researches verifiable facts from live sources rather than guessing, creates events through the same action layer as everything else, tags/manifests every batch for precise undo. Also functioned as a real, working preview of §10's "directive → researched → action-layer calls" shape, which directly fed the §10 correction below.
 - **M7 (v2) — Voice input. ✅ Done** (§9 — see its "Implementation (M7 — done)" subsection for the full writeup). Mic button, `MediaRecorder` capture, Deepgram transcription endpoint — press-and-hold, `POST /api/voice/transcribe`, transcript displayed as `Heard: "…"`. Deliberately stops there: nothing from M8 (below) is built or stubbed. Verified against isolated instances only — no real `DEEPGRAM_API_KEY` is available yet, so real-device/real-API verification is a follow-up once one is provided. Unaffected by M8's correction below — still exactly this.
-- **M8 (v2) — Command layer.** *Corrected from the original plan* (see §10's own note) — not Ollama; a headless Claude Code invocation (`claude -p`, `CLAUDE_CODE_OAUTH_TOKEN` for subscription billing, M3's MCP server auto-discovered — no `--mcp-config` needed) with haiku as the fast default and an on-demand sonnet research subagent for anything needing real-world facts, same judgment call `calendar-add` already encodes. Undo via the batch-tag mechanism generalized out of `calendar-add`, not a confirm-before-execute UI dialog. Both open questions §10 originally flagged are now confirmed empirically (real subagent execution, real MCP inheritance — see §10) — the one real gotcha that testing surfaced: headless mode needs an explicit `--allowedTools` list, since there's no TTY to interactively approve a tool call, and a denied call fails silently (`is_error:false` with plausible-sounding prose) unless the `permission_denials` field is checked explicitly.
+- **Batch-tag-and-undo, generalized into the action layer. ✅ Done** (§10a-2), between M7 and M8. `backend/src/actions/batches.ts`'s `mintBatchId`/`undoBatch`, a real indexed `batch_id` column on `events`/`todos` (replacing calendar-add's description-tag-plus-manifest-file approach as the *undo* mechanism, though the human-readable trace is kept for the same provenance value), and an optional `batchId` param threaded through `createEvent`/`addTodo`. Built ahead of M8 for the same reason the MCP server (§10a) was built ahead of voice: M8 needs this primitive to already exist, not to build it inline while also building the voice endpoint. `calendar-add` itself is untouched — still its own tested, working file-manifest mechanism; migrating it wasn't worth the risk for a purely cosmetic consistency win. First Vitest unit tests in this repo (`backend/src/actions/batches.test.ts`), since this primitive has no HTTP surface yet for Playwright to reach through.
+- **M8 (v2) — Command layer.** *Corrected from the original plan* (see §10's own note) — not Ollama; a headless Claude Code invocation (`claude -p`, `CLAUDE_CODE_OAUTH_TOKEN` for subscription billing, M3's MCP server auto-discovered — no `--mcp-config` needed) with haiku as the fast default and an on-demand sonnet research subagent for anything needing real-world facts, same judgment call `calendar-add` already encodes. Undo via the batch-tag mechanism generalized out of `calendar-add` (§10a-2, done ahead of this milestone — see above), not a confirm-before-execute UI dialog: mint one batch id per accepted command, thread it through every action call the command makes, undo via `undoBatch`. Both open questions §10 originally flagged are now confirmed empirically (real subagent execution, real MCP inheritance — see §10) — the one real gotcha that testing surfaced: headless mode needs an explicit `--allowedTools` list, since there's no TTY to interactively approve a tool call, and a denied call fails silently (`is_error:false` with plausible-sounding prose) unless the `permission_denials` field is checked explicitly.
 - **M9 (v3+) — extras.** Weather, meal planning, grocery list, multiple to-do lists, todo due-date reminders (same mechanism as §8a, extended to todos), revisit Google Calendar sync *only* if a concrete need actually shows up (§7).
 
 ---
