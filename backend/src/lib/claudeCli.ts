@@ -147,6 +147,29 @@ function resolveCommand(): { command: string; prefixArgs: string[] } {
   return { command, prefixArgs };
 }
 
+// Real incident, found via direct testing: the `our-calendar` MCP server is
+// registered at *user* config scope (see this file's own doc comment above),
+// meaning it's the same fixed, globally-registered path — pointing at
+// whichever checkout it was last registered from — no matter which backend
+// process/checkout actually spawns `claude`. Testing this endpoint from an
+// isolated worktree still silently ran the *main checkout's* MCP server,
+// which resolves `DB_DIR_NAME` relative to the wrong checkout entirely —
+// once landing in an unmonitored stray file, and once (a separate mistake,
+// a one-off manual script that didn't set `DB_DIR_NAME` at all) landing in
+// the real production database. `CLAUDE_MCP_CONFIG_PATH`, set only for
+// isolated test runs (never in production), adds `--strict-mcp-config
+// --mcp-config <path>` — `--strict-mcp-config` disables auto-discovery of
+// the user-scoped registration entirely, so a test invocation can only ever
+// reach whatever server the given config file actually defines. Point that
+// file at a server still *named* "our-calendar" (just with its command/args
+// pointing at the worktree's own build) so `voiceCommand.ts`'s
+// `--allowedTools` list (`mcp__our-calendar__*`) needs no test-vs-prod
+// branching at all — only which binary "our-calendar" resolves to changes.
+function resolveMcpConfigArgs(): string[] {
+  const configPath = process.env.CLAUDE_MCP_CONFIG_PATH;
+  return configPath ? ["--strict-mcp-config", "--mcp-config", configPath] : [];
+}
+
 const DEFAULT_TIMEOUT_MS = 45_000;
 
 /**
@@ -184,6 +207,7 @@ export async function runClaudeCommand(
   const { command, prefixArgs } = resolveCommand();
   const args = [
     ...prefixArgs,
+    ...resolveMcpConfigArgs(),
     "--print",
     prompt,
     "--model",
