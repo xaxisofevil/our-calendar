@@ -11,6 +11,10 @@ dist/
 # Agent worktrees are throwaway scratch checkouts, not part of history
 .claude/worktrees/
 
+# calendar-add skill's run manifests -- real household data (which real
+# events were created when), not something to version-control
+.claude/skills/calendar-add/runs/
+
 # Playwright (e2e/, see playwright.config.ts)
 /playwright-report/
 /test-results/
