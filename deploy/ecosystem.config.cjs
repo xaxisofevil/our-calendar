@@ -9,9 +9,10 @@
 //   pm2 save
 //   pm2-startup install   (one-time, registers PM2 itself to launch at boot)
 //
-// AUTH_PASSCODE, DUCKDNS_API_TOKEN, and (as of M5's push notifications,
-// §8a) VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY must be set in the environment
-// BEFORE running `pm2 start`/`pm2 restart --update-env` — PM2 snapshots
+// AUTH_PASSCODE, DUCKDNS_API_TOKEN, (as of M5's push notifications, §8a)
+// VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY, and (as of §9's voice capture)
+// DEEPGRAM_API_KEY must be set in the environment BEFORE running
+// `pm2 start`/`pm2 restart --update-env` — PM2 snapshots
 // each app's env at that moment via process.env below, and `pm2 save`
 // persists that snapshot across reboots. See ARCHITECTURE.md §6/§8a for
 // where to get each value and how to set them (PowerShell
@@ -32,6 +33,7 @@ module.exports = {
         AUTH_PASSCODE: process.env.AUTH_PASSCODE || "",
         VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || "",
         VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || "",
+        DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || "",
       },
     },
     {
