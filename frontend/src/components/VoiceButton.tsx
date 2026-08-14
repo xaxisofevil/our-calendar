@@ -105,7 +105,10 @@ export function VoiceButton() {
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-    if (status === "recording") stop();
+    // Always forward release. The hook handles both an active recorder and
+    // the permission-prompt race where getUserMedia has not resolved yet;
+    // consulting this render's status here can be stale on a fast press.
+    stop();
   }
 
   return createPortal(

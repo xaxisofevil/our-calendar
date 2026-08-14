@@ -69,6 +69,20 @@ test.describe("POST /api/voice/transcribe", () => {
     expect(body.error).toBeTruthy();
   });
 
+  test("rejects unsupported media types and audio bodies over 2 MB", async ({ page }) => {
+    const wrongType = await page.request.post("/api/voice/transcribe", {
+      data: Buffer.from("not declared as audio"),
+      headers: { "Content-Type": "text/plain" },
+    });
+    expect(wrongType.status()).toBe(400);
+
+    const tooLarge = await page.request.post("/api/voice/transcribe", {
+      data: Buffer.alloc(2 * 1024 * 1024 + 1),
+      headers: { "Content-Type": "audio/webm" },
+    });
+    expect(tooLarge.status()).toBe(413);
+  });
+
   test("a Deepgram API error is sanitized into a 502, never relaying the upstream body", async ({ page }) => {
     const res = await page.request.post("/api/voice/transcribe", {
       data: Buffer.from("TRIGGER_DEEPGRAM_ERROR"),
@@ -103,8 +117,23 @@ test.describe("POST /api/voice/transcribe", () => {
   });
 });
 
-test.describe("Push-to-talk voice button (UI)", () => {
+test.describe("Voice browser-tab privacy gate", () => {
+  test("does not expose voice outside installed standalone display mode", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: /hold to talk/i })).toHaveCount(0);
+  });
+});
+
+test.describe("Push-to-talk voice button (installed PWA UI)", () => {
   test.use({ viewport: { width: 390, height: 844 } });
+  test.beforeEach(async ({ page }) => {
+    // Chromium's test page is an ordinary tab; model iOS's documented
+    // standalone marker so the installed-PWA-only product gate is tested
+    // without pretending it is server-verifiable attestation.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "standalone", { configurable: true, value: true });
+    });
+  });
 
   /** Registers fake `navigator.mediaDevices.getUserMedia`/`window.MediaRecorder`
    * implementations before any page script runs (Playwright guarantee for
@@ -142,9 +171,12 @@ test.describe("Push-to-talk voice button (UI)", () => {
       // a bare assignment silently no-ops (or throws in strict mode)
       // instead of actually replacing it, so this uses defineProperty the
       // same way any real override of a read-only host getter has to.
+      let micStopCount = 0;
+      Object.defineProperty(window, "__micStopCount", { configurable: true, get: () => micStopCount });
+      const track = { stop: () => micStopCount++ };
       Object.defineProperty(navigator, "mediaDevices", {
         configurable: true,
-        value: { getUserMedia: async () => ({ getTracks: () => [] }) },
+        value: { getUserMedia: async () => ({ getTracks: () => [track] }) },
       });
     }, fakeAudioText);
   }
@@ -213,6 +245,23 @@ test.describe("Push-to-talk voice button (UI)", () => {
     ]);
     expect(uploadResponse.status()).toBe(200);
 
+    await expect(page.getByText(/Added 'Buy milk \(voice test\)' to the to-do list\./)).toBeVisible();
+  });
+
+  test("a hard 15-second privacy cap stops and releases the microphone even without pointer-up", async ({ page }) => {
+    await page.clock.install();
+    await mockWorkingMic(page, "MOCK_ADD_TODO privacy cap test");
+    await page.goto("/");
+
+    const button = page.getByRole("button", { name: /hold to talk/i });
+    const box = await button.boundingBox();
+    if (!box) throw new Error("mic button has no bounding box");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.clock.fastForward(15_001);
+    await page.mouse.up();
+
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __micStopCount: number }).__micStopCount)).toBeGreaterThan(0);
     await expect(page.getByText(/Added 'Buy milk \(voice test\)' to the to-do list\./)).toBeVisible();
   });
 

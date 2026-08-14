@@ -38,6 +38,13 @@ export class DeepgramConfigError extends Error {
  * account-identifying detail) to the client, and this class never reads
  * that body in the first place so there's nothing to accidentally forward
  * or log later. */
+export class DeepgramTimeoutError extends Error {
+  constructor() {
+    super("Deepgram request timed out");
+    this.name = "DeepgramTimeoutError";
+  }
+}
+
 export class DeepgramApiError extends Error {
   readonly status: number;
   constructor(status: number) {
@@ -81,18 +88,23 @@ export async function transcribeAudio(
 
   const url = process.env.DEEPGRAM_API_URL || DEFAULT_DEEPGRAM_API_URL;
 
-  const res = await fetchImpl(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Token ${apiKey}`,
-      "Content-Type": contentType || "application/octet-stream",
-    },
-    // @types/node's fetch BodyInit typing doesn't include Node's `Buffer`
-    // even though it's a real Uint8Array at runtime (undici, which Node's
-    // global fetch is built on, accepts it directly) — a plain cast rather
-    // than a real conversion, since there's nothing to actually convert.
-    body: audio as unknown as BodyInit,
-  });
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "Content-Type": contentType || "application/octet-stream",
+      },
+      signal: AbortSignal.timeout(30_000),
+      // @types/node's fetch BodyInit typing doesn't include Node's `Buffer`
+      // even though it's accepted by Node's undici implementation.
+      body: audio as unknown as BodyInit,
+    });
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "TimeoutError") throw new DeepgramTimeoutError();
+    throw err;
+  }
 
   if (!res.ok) {
     throw new DeepgramApiError(res.status);

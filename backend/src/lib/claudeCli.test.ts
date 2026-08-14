@@ -72,6 +72,8 @@ afterEach(() => {
   delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
   delete process.env.CLAUDE_CLI_COMMAND;
   delete process.env.CLAUDE_CLI_ARGS_PREFIX;
+  delete process.env.CLAUDE_MCP_CONFIG_PATH;
+  delete process.env.NODE_ENV;
 });
 
 describe("runClaudeCommand", () => {
@@ -219,6 +221,21 @@ describe("runClaudeCommand", () => {
 
     expect(capturedCommand).toBe("node");
     expect(capturedArgs?.slice(0, 2)).toEqual(["/path/to/mock-claude-cli.mjs", "--print"]);
+  });
+
+  it("kills the child and rejects when captured output exceeds the memory cap", async () => {
+    const fake = makeFakeChild();
+    const promise = runClaudeCommand("hello", baseOptions, spawnReturning(fake));
+    fake.stdout.emit("data", "x".repeat(1_000_001));
+    await expect(promise).rejects.toMatchObject({ reason: "output_too_large" });
+    expect(fake.kill).toHaveBeenCalled();
+  });
+
+  it("requires a pinned MCP config in production before spawning", async () => {
+    process.env.NODE_ENV = "production";
+    const spawnImpl = vi.fn();
+    await expect(runClaudeCommand("hello", baseOptions, spawnImpl)).rejects.toBeInstanceOf(ClaudeCliConfigError);
+    expect(spawnImpl).not.toHaveBeenCalled();
   });
 
   it("kills the child and rejects with reason timeout if it runs longer than timeoutMs", async () => {

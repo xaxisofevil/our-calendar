@@ -3,7 +3,6 @@ import type {
   CreateTodoInput,
   EventRecord,
   PersonRecord,
-  ProposedDestructiveAction,
   PushSubscriptionRecord,
   SubscribePushInput,
   TodoRecord,
@@ -162,15 +161,11 @@ export async function runVoiceCommand(transcript: string): Promise<VoiceCommandR
   return body as VoiceCommandResult;
 }
 
-// ARCHITECTURE.md §10/§12 (M8) — executes a previously-proposed destructive
-// action. `action` is echoed back exactly as the server returned it in
-// `VoiceCommandResult.proposedAction` (routes/voice.ts's stateless-confirm
-// design — see that file's own comment on why); this is a plain
-// request()-shaped mutation like any other in this app (400/404 bodies
-// follow the same shapes updateEvent/deleteEvent's own REST routes already
-// do, so friendlyErrorMessage handles them without anything voice-specific).
-export function confirmVoiceAction(action: ProposedDestructiveAction): Promise<{ outcome: "executed" }> {
-  return request("/api/voice/confirm", { method: "POST", body: JSON.stringify(action) });
+// Executes a previously-proposed destructive action by opaque, short-lived,
+// server-issued confirmation id. Executable target/details never make a
+// client-controlled round trip through this endpoint.
+export function confirmVoiceAction(confirmationId: string): Promise<{ outcome: "executed" }> {
+  return request("/api/voice/confirm", { method: "POST", body: JSON.stringify({ confirmationId }) });
 }
 
 // ARCHITECTURE.md §10a-2/§10/§12 (M8) — undoes everything a given voice

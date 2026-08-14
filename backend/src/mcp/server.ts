@@ -87,6 +87,17 @@ function runAction<T>(fn: () => T) {
 // CLAUDE_CODE_OAUTH_TOKEN was available while this was built — see that
 // same note).
 const voiceCommandBatchId = process.env.VOICE_COMMAND_BATCH_ID || undefined;
+const MAX_VOICE_CREATES = 20;
+let voiceCreateCount = 0;
+
+function runCreate<T>(fn: () => T) {
+  if (voiceCommandBatchId && voiceCreateCount >= MAX_VOICE_CREATES) {
+    return errorResult(`Voice commands may create at most ${MAX_VOICE_CREATES} items.`);
+  }
+  const result = runAction(fn);
+  if (voiceCommandBatchId && !("isError" in result)) voiceCreateCount++;
+  return result;
+}
 
 const server = new McpServer({ name: "our-calendar", version: "0.1.0" });
 
@@ -130,7 +141,7 @@ server.registerTool(
       "Create a new calendar event. Set recurrenceRule to a bare RFC 5545 RRULE string (e.g. \"FREQ=WEEKLY;BYDAY=TH\") to make it recurring; omit it for a one-off event.",
     inputSchema: createEventSchema,
   },
-  async (args) => runAction(() => createEvent(args, voiceCommandBatchId)),
+  async (args) => runCreate(() => createEvent(args, voiceCommandBatchId)),
 );
 
 server.registerTool(
@@ -177,7 +188,7 @@ server.registerTool(
     description: "Add a new item to the shared household to-do list.",
     inputSchema: createTodoSchema,
   },
-  async (args) => runAction(() => addTodo(args, voiceCommandBatchId)),
+  async (args) => runCreate(() => addTodo(args, voiceCommandBatchId)),
 );
 
 server.registerTool(

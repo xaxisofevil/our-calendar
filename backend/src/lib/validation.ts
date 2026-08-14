@@ -28,19 +28,32 @@ const recurrenceRuleField = z
     { message: "Invalid recurrence rule" },
   );
 
-export const createEventSchema = z.object({
+const eventDateTime = z.string().datetime({ offset: true });
+const eventFieldsSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(4000).nullable().optional(),
   location: z.string().trim().max(200).nullable().optional(),
-  startAt: z.string().min(1),
-  endAt: z.string().min(1),
+  startAt: eventDateTime,
+  endAt: eventDateTime,
   allDay: z.boolean().optional().default(false),
-  personId: z.number().int().nullable().optional(),
+  personId: z.number().int().positive().nullable().optional(),
   recurrenceRule: recurrenceRuleField,
 });
+
+function validEventRange(value: { startAt: string; endAt: string }, ctx: z.RefinementCtx): void {
+  const start = new Date(value.startAt).getTime();
+  const end = new Date(value.endAt).getTime();
+  const horizon = 10 * 365.25 * 24 * 60 * 60_000;
+  if (end <= start) ctx.addIssue({ code: "custom", path: ["endAt"], message: "End must be after start" });
+  if (Math.abs(start - Date.now()) > horizon) {
+    ctx.addIssue({ code: "custom", path: ["startAt"], message: "Event must be within 10 years" });
+  }
+}
+
+export const createEventSchema = eventFieldsSchema.superRefine(validEventRange);
 export type CreateEventInput = z.infer<typeof createEventSchema>;
 
-export const updateEventSchema = createEventSchema.partial();
+export const updateEventSchema = eventFieldsSchema.partial();
 export type UpdateEventInput = z.infer<typeof updateEventSchema>;
 
 // Optional ISO 8601 date (YYYY-MM-DD) — see ARCHITECTURE.md §8/§11.
@@ -123,11 +136,18 @@ export type VoiceCommandRequestInput = z.infer<typeof voiceCommandRequestSchema>
 // drifting definition of "what a proposed destructive action looks like."
 export const proposedDestructiveActionSchema = z.object({
   type: z.enum(["delete_event", "update_event", "delete_todo", "update_todo"]),
-  targetId: z.number().int(),
+  targetId: z.number().int().positive(),
   summary: z.string().trim().min(1).max(500),
   details: z.record(z.string(), z.unknown()).default({}),
 });
 export type ProposedDestructiveAction = z.infer<typeof proposedDestructiveActionSchema>;
+
+// The client confirms only an opaque, short-lived, single-use server-issued
+// id. It never echoes executable type/target/details back to the mutation
+// endpoint; see lib/voiceConfirmations.ts.
+export const voiceConfirmationRequestSchema = z.object({
+  confirmationId: z.string().uuid(),
+});
 
 // The extended structured-output contract every voice-command-layer LLM
 // invocation (haiku triage, and the on-demand sonnet research escalation —

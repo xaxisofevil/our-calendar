@@ -11,8 +11,8 @@
 //
 // AUTH_PASSCODE, DUCKDNS_API_TOKEN, (as of M5's push notifications, §8a)
 // VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY, and (as of §9's voice capture)
-// DEEPGRAM_API_KEY must be set in the environment BEFORE running
-// `pm2 start`/`pm2 restart --update-env` — PM2 snapshots
+// DEEPGRAM_API_KEY and CLAUDE_CODE_OAUTH_TOKEN must be set in the
+// environment BEFORE running `pm2 start`/`pm2 restart --update-env` — PM2 snapshots
 // each app's env at that moment via process.env below, and `pm2 save`
 // persists that snapshot across reboots. See ARCHITECTURE.md §6/§8a for
 // where to get each value and how to set them (PowerShell
@@ -34,6 +34,12 @@ module.exports = {
         VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || "",
         VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || "",
         DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || "",
+        CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN || "",
+        CLAUDE_CLI_COMMAND: "C:/Users/ericm/.local/bin/claude.exe",
+        CLAUDE_CLI_ARGS_PREFIX: "",
+        CLAUDE_MCP_CONFIG_PATH:
+          process.env.CLAUDE_MCP_CONFIG_PATH ||
+          "C:/Users/ericm/projects/our-calendar/deploy/claude-mcp.production.json",
       },
     },
     {

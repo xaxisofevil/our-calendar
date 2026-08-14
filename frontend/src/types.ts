@@ -103,6 +103,7 @@ export interface VoiceCommandResult {
   batchId?: string;
   summary?: string;
   proposedAction?: ProposedDestructiveAction;
+  confirmationId?: string;
   error?: string;
 }
 

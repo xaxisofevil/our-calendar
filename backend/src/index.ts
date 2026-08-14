@@ -12,6 +12,14 @@ import { requireAuth } from "./middleware/requireAuth.js";
 import { scanAndSendReminders } from "./lib/reminders.js";
 import { REMINDER_SCAN_INTERVAL_MS } from "./lib/constants.js";
 
+// Remote production must never silently fall back to an unauthenticated
+// calendar because a PM2/environment value was omitted. Local development
+// retains the documented no-passcode escape hatch, but production fails
+// closed before opening a listening socket.
+if (process.env.NODE_ENV === "production" && !process.env.AUTH_PASSCODE) {
+  throw new Error("AUTH_PASSCODE is required when NODE_ENV=production; refusing to start unauthenticated.");
+}
+
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 
@@ -88,6 +96,11 @@ app.use("/api/voice", voiceRouter);
 // Minimal error handler so a thrown/rejected handler returns JSON, not an
 // HTML stack trace, to a frontend that only ever expects JSON.
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (status === 413) {
+    res.status(413).json({ error: "Request body is too large." });
+    return;
+  }
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 });
