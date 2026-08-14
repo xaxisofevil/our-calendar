@@ -112,18 +112,6 @@ export interface UndoBatchResult {
   deletedTodos: number;
 }
 
-// ARCHITECTURE.md §10b (M9) — mirrors backend/src/lib/deepgram.ts's
-// `TranscribedWord`/`TranscriptionResult`. `words` is the per-word
-// confidence data the auto-listen confirm whitelist gate
-// (lib/voiceConfirmWhitelist.ts) checks alongside a plain-word match —
-// both are required, neither alone is enough (see that file's own
-// comment).
-export interface TranscribedWord {
-  word: string;
-  confidence: number;
-}
-
 export interface TranscribeVoiceResult {
   transcript: string;
-  words: TranscribedWord[];
 }

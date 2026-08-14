@@ -42,12 +42,9 @@ voiceRouter.post("/transcribe", rawAudio, async (req, res) => {
   try {
     // An empty transcript is Deepgram's own valid "didn't catch any speech"
     // result (§9) — returned as-is, not treated as an error. The frontend
-    // decides how to represent that to the user (VoiceButton.tsx). `words`
-    // (§10b, M9) is the per-word confidence data the frontend's auto-listen
-    // confirm gate needs — every existing caller of this route already
-    // ignores unknown response fields, so this is purely additive.
-    const { transcript, words } = await transcribeAudio(req.body, contentType);
-    res.status(200).json({ transcript, words });
+    // decides how to represent that to the user (VoiceButton.tsx).
+    const { transcript } = await transcribeAudio(req.body, contentType);
+    res.status(200).json({ transcript });
   } catch (err) {
     if (err instanceof DeepgramConfigError) {
       // Logged without the error's own detail beyond "not configured" —

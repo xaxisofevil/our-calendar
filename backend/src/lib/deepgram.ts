@@ -52,38 +52,21 @@ interface DeepgramListenResponse {
     channels?: Array<{
       alternatives?: Array<{
         transcript?: string;
-        // ARCHITECTURE.md §10b (M9) — per-word confidence, needed for the
-        // voice-driven auto-confirm whitelist gate. Confirmed against
-        // Deepgram's own docs (developers.deepgram.com/reference/
-        // speech-to-text/listen-pre-recorded): a 0–1 double per word, at
-        // `results.channels[].alternatives[].words[].confidence` — not
-        // guessed/assumed.
-        words?: Array<{ word?: string; confidence?: number }>;
       }>;
     }>;
   };
 }
 
-/** A transcribed word plus Deepgram's own confidence score for it (0–1).
- * §10b's auto-confirm whitelist gate is the reason this exists — everything
- * else that consumes `transcribeAudio`'s result only cares about
- * `transcript`. */
-export interface TranscribedWord {
-  word: string;
-  confidence: number;
-}
-
 export interface TranscriptionResult {
   transcript: string;
-  words: TranscribedWord[];
 }
 
 /**
  * Sends one audio clip to Deepgram's pre-recorded transcription endpoint
- * and returns the transcript text plus per-word confidence. An empty
- * transcript/word list is a valid, non-error result (Deepgram genuinely
- * found no speech — a silent/unintelligible clip, §9's own "didn't catch
- * that" case), not something this function treats specially.
+ * and returns the transcript text. An empty transcript is a valid,
+ * non-error result (Deepgram genuinely found no speech — a silent or
+ * unintelligible clip, §9's own "didn't catch that" case), not something
+ * this function treats specially.
  *
  * Throws `DeepgramConfigError` if `DEEPGRAM_API_KEY` isn't set, or
  * `DeepgramApiError` if Deepgram responds with a non-2xx status.
@@ -117,9 +100,5 @@ export async function transcribeAudio(
 
   const data = (await res.json()) as DeepgramListenResponse;
   const alternative = data.results?.channels?.[0]?.alternatives?.[0];
-  const words: TranscribedWord[] = (alternative?.words ?? [])
-    .filter((w): w is { word: string; confidence?: number } => typeof w.word === "string")
-    .map((w) => ({ word: w.word, confidence: typeof w.confidence === "number" ? w.confidence : 0 }));
-
-  return { transcript: alternative?.transcript ?? "", words };
+  return { transcript: alternative?.transcript ?? "" };
 }
