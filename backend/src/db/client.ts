@@ -100,18 +100,6 @@ sqlite.exec(`
     PRIMARY KEY (event_id, occurrence_start_at)
   );
 
-  -- ARCHITECTURE.md §10/§11 (M8) — audit trail for every POST
-  -- /api/voice/command invocation (lib/voiceCommand.ts). See db/schema.ts's
-  -- voiceCommands table comment for the column-by-column reasoning.
-  CREATE TABLE IF NOT EXISTS voice_commands (
-    id             INTEGER PRIMARY KEY,
-    transcript     TEXT NOT NULL,
-    model_tier     TEXT NOT NULL,
-    parsed_action  TEXT,
-    batch_id       TEXT,
-    status         TEXT NOT NULL,
-    created_at     TEXT NOT NULL
-  );
 `);
 
 // Dev-time migration shims: if an earlier run of this app created a table

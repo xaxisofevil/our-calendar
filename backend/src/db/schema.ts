@@ -120,32 +120,10 @@ export const sentReminders = sqliteTable(
   (table) => [primaryKey({ columns: [table.eventId, table.occurrenceStartAt] })],
 );
 
-/**
- * ARCHITECTURE.md §10/§11 (M8) — one row per `POST /api/voice/command`
- * invocation, the audit trail for the whole voice command layer. `status`
- * is derived server-side from the outcome (see lib/voiceCommand.ts's
- * `runVoiceCommand`), never trusted from the LLM's own self-report:
- * "accepted" (the model produced a valid, actionable result — whether that
- * was an executed create or a proposed destructive action awaiting
- * confirmation), "rejected" (a valid triage that concluded no action was
- * warranted), or "error" (the invocation itself failed — bad config, a
- * denied tool call, malformed structured output, etc.). `batchId` mirrors
- * `events.batchId`/`todos.batchId` (§10a-2) — NULL unless this command
- * actually created something, in which case `undoBatch(batchId)` reverses
- * exactly what it created, tying the audit trail to the same undo
- * mechanism rather than inventing a second one.
- */
-export const voiceCommands = sqliteTable("voice_commands", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  transcript: text("transcript").notNull(),
-  // 'haiku' | 'haiku+sonnet-research' — see lib/voiceCommand.ts.
-  modelTier: text("model_tier").notNull(),
-  // JSON-stringified structured LLM output (or a plain error description
-  // for the 'error' status) — free text here, not a typed column, same
-  // "log the interesting bit as JSON text" choice actions/errors.ts's own
-  // ActionValidationError.issues makes for validation failures elsewhere.
-  parsedAction: text("parsed_action"),
-  batchId: text("batch_id"),
-  status: text("status").notNull(),
-  createdAt: text("created_at").notNull(),
-});
+// ARCHITECTURE.md §10/§11 (M8) — there used to be a voice_commands table
+// here, an audit-trail row (raw transcript + full parsed result) written on
+// every POST /api/voice/command invocation. Removed entirely, direct
+// request, post-launch-prep: nothing in the app ever read it back (no
+// history UI, no route), so it was pure indefinite retention of raw
+// household speech/interpreted-activity content for zero product benefit.
+// See lib/voiceCommand.ts's own comment for the full reasoning.

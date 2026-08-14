@@ -1,6 +1,5 @@
 import { getBatch, mintBatchId } from "../actions/batches.js";
 import { listPeople } from "../actions/people.js";
-import { recordVoiceCommand, type VoiceCommandStatus, type VoiceModelTier } from "../actions/voiceCommands.js";
 import { voiceLlmOutputSchema, type ProposedDestructiveAction, type VoiceLlmOutput } from "./validation.js";
 import { ClaudeCliConfigError, ClaudeCliError, runClaudeCommand, type ClaudeCliSpawnFn } from "./claudeCli.js";
 
@@ -10,9 +9,17 @@ import { ClaudeCliConfigError, ClaudeCliError, runClaudeCommand, type ClaudeCliS
 // something POST /api/voice/command can hand back to the frontend. This is
 // the one place that knows this app's specific voice-command schema,
 // prompts, and tool allowlists — lib/claudeCli.ts below it is generic
-// "run one structured claude -p call"; actions/batches.ts and
-// actions/voiceCommands.ts above it are the shared primitives this wires
-// together.
+// "run one structured claude -p call"; actions/batches.ts above it is the
+// shared primitive this wires together.
+//
+// Direct request, post-launch-prep: this used to also write an audit-trail
+// row (transcript + full parsed result) to a voice_commands table on every
+// invocation. Removed entirely — nothing in the app ever read it back (no
+// history UI, no route), so it was pure indefinite retention of raw
+// household speech/interpreted-activity content for zero product benefit,
+// exactly the kind of thing the pre-merge security audit exists to catch.
+// If a misfire needs debugging in the future, that's a live-logs-at-the-
+// time question, not something worth a permanent database table for.
 //
 // ============================================================================
 // SECURITY: the tool allowlists below are the actual enforcement point for
@@ -133,6 +140,8 @@ You are the fast, first-pass tier. If you set needsResearch, a separate research
 You are the research-escalation tier, invoked because a first-pass triage already determined this needs real-world research. You have WebSearch/WebFetch — cross-check sources rather than trusting a single one, the same standard this household's calendar-add skill already holds itself to. You are the last tier: if you still can't determine what's needed after researching, don't set needsResearch again — set actionTaken explaining what you couldn't determine and why.`;
 }
 
+export type VoiceModelTier = "haiku" | "haiku+sonnet-research";
+
 export interface VoiceCommandResult {
   outcome: "executed" | "needs_confirmation" | "no_action" | "error";
   modelTier: VoiceModelTier;
@@ -140,19 +149,6 @@ export interface VoiceCommandResult {
   summary?: string;
   proposedAction?: ProposedDestructiveAction;
   error?: string;
-}
-
-function outcomeToStatus(outcome: VoiceCommandResult["outcome"]): VoiceCommandStatus {
-  // 'executed'/'needs_confirmation' both mean the model produced a valid,
-  // actionable result (a create that happened, or a destructive change
-  // it's proposing) — 'accepted'. 'no_action' is also a *valid* triage,
-  // just one that concluded nothing was warranted — 'rejected', not
-  // 'error'. Only an invocation that itself failed (bad config, denied
-  // tool, malformed output, ...) is 'error'. See db/schema.ts's
-  // voiceCommands comment for the same breakdown.
-  if (outcome === "executed" || outcome === "needs_confirmation") return "accepted";
-  if (outcome === "no_action") return "rejected";
-  return "error";
 }
 
 /**
@@ -194,8 +190,7 @@ async function triage(
  * if requested, resolving to exactly one outcome. Never throws for a
  * failure that happens *inside* the LLM invocation (a denied tool call, a
  * malformed response, a timeout, ...) — those all resolve to
- * `{ outcome: "error" }` and are still recorded in `voice_commands`, same
- * as any other outcome. The one thing this still throws is
+ * `{ outcome: "error" }` instead. The one thing this still throws is
  * `ClaudeCliConfigError` (CLAUDE_CODE_OAUTH_TOKEN missing) — a deployment
  * configuration problem, not a per-command outcome, mirroring how
  * routes/voice.ts already treats `DeepgramConfigError` for §9's
@@ -259,31 +254,10 @@ export async function runVoiceCommand(transcript: string, spawnImpl?: ClaudeCliS
       err instanceof ClaudeCliError
         ? claudeCliErrorMessage(err)
         : "Couldn't understand or act on that voice command.";
-    // The detailed reason (permission denial, timeout, schema mismatch,
-    // ...) is worth keeping for debugging misfires (ARCHITECTURE.md §10's
-    // own stated reason for logging every command) but is never something
-    // to surface verbatim to the client — same "sanitize before it leaves
-    // the server" instinct as routes/voice.ts's existing Deepgram error
-    // handling.
-    const detail = err instanceof ClaudeCliError ? `${err.reason}: ${err.detail}` : String(err);
-    recordVoiceCommand({
-      transcript,
-      modelTier: tier,
-      parsedAction: detail.slice(0, 4000),
-      batchId: null,
-      status: "error",
-    });
     return { outcome: "error", modelTier: tier, error: message };
   }
 
   const outcome = resultToOutcome(result, batchId);
-  recordVoiceCommand({
-    transcript,
-    modelTier: tier,
-    parsedAction: JSON.stringify(result),
-    batchId: outcome.outcome === "executed" ? batchId : null,
-    status: outcomeToStatus(outcome.outcome),
-  });
   return { ...outcome, modelTier: tier };
 }
 

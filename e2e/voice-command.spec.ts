@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { latestVoiceCommand } from "./db";
 
 // ARCHITECTURE.md §10/§12 (M8) — POST /api/voice/command and
 // POST /api/voice/confirm. Same spirit as e2e/voice.spec.ts's own header:
@@ -15,14 +14,13 @@ import { latestVoiceCommand } from "./db";
 // Covers: the direct-action fast path (haiku creates something), the
 // needs-research escalation path (haiku defers, sonnet finishes and
 // creates something), a proposed-destructive-action followed by a real
-// POST /api/voice/confirm, a no-action triage, the invocation itself
-// failing, and — for every case above — that a voice_commands row got
-// written with the right model tier/status/batch id (read straight out of
-// the isolated e2e SQLite file, e2e/db.ts, the same "no HTTP surface for
-// something only a test needs" pattern already used for push_subscriptions/
-// sent_reminders). The missing-CLAUDE_CODE_OAUTH_TOKEN path is covered
-// separately, against the same dedicated unconfigured backend instance
-// e2e/voice.spec.ts already uses for DEEPGRAM_API_KEY.
+// POST /api/voice/confirm, a no-action triage, and the invocation itself
+// failing — all asserted straight off the HTTP response body. (There used
+// to also be a voice_commands audit-trail row asserted here on every case;
+// removed along with the table itself — see lib/voiceCommand.ts's comment.)
+// The missing-CLAUDE_CODE_OAUTH_TOKEN path is covered separately, against
+// the same dedicated unconfigured backend instance e2e/voice.spec.ts
+// already uses for DEEPGRAM_API_KEY.
 
 const VOICE_UNCONFIGURED_BASE = "http://localhost:4403";
 
@@ -39,12 +37,6 @@ test.describe("POST /api/voice/command", () => {
 
     const todos = await (await page.request.get("/api/todos")).json();
     expect(todos.some((t: { text: string }) => t.text === "Buy milk (voice test)")).toBe(true);
-
-    const row = latestVoiceCommand(transcript);
-    expect(row).toBeTruthy();
-    expect(row?.model_tier).toBe("haiku");
-    expect(row?.status).toBe("accepted");
-    expect(row?.batch_id).toBe(body.batchId);
 
     // The batch-id/undo round trip: undoing removes exactly what this
     // command created (ARCHITECTURE.md §10a-2's undoBatch, exposed here
@@ -69,11 +61,6 @@ test.describe("POST /api/voice/command", () => {
 
     const events = await (await page.request.get("/api/events")).json();
     expect(events.some((e: { title: string }) => e.title === "Researched Game Night (voice test)")).toBe(true);
-
-    const row = latestVoiceCommand(transcript);
-    expect(row?.model_tier).toBe("haiku+sonnet-research");
-    expect(row?.status).toBe("accepted");
-    expect(row?.batch_id).toBe(body.batchId);
   });
 
   test("a transcript with no actionable intent triages to no_action, not an error", async ({ page }) => {
@@ -83,25 +70,15 @@ test.describe("POST /api/voice/command", () => {
     const body = await res.json();
     expect(body.outcome).toBe("no_action");
     expect(body.batchId).toBeUndefined();
-
-    const row = latestVoiceCommand(transcript);
-    expect(row?.status).toBe("rejected");
-    expect(row?.batch_id).toBeNull();
   });
 
-  test("the invocation itself failing resolves to outcome: error, not a 500, and is still logged", async ({
-    page,
-  }) => {
+  test("the invocation itself failing resolves to outcome: error, not a 500", async ({ page }) => {
     const transcript = "MOCK_CLAUDE_ERROR simulate a crash";
     const res = await page.request.post("/api/voice/command", { data: { transcript } });
     expect(res.status()).toBe(200);
     const body = await res.json();
     expect(body.outcome).toBe("error");
     expect(typeof body.error).toBe("string");
-
-    const row = latestVoiceCommand(transcript);
-    expect(row?.status).toBe("error");
-    expect(row?.batch_id).toBeNull();
   });
 
   test("rejects an empty transcript with a 400 before ever invoking the model", async ({ page }) => {
@@ -152,10 +129,6 @@ test.describe("POST /api/voice/confirm", () => {
       summary: "Delete the test event (voice test)",
       details: {},
     });
-
-    const row = latestVoiceCommand(transcript);
-    expect(row?.status).toBe("accepted");
-    expect(row?.batch_id).toBeNull(); // proposing never creates anything
 
     // Nothing was deleted yet — the proposal alone must never execute.
     const eventsBeforeConfirm = await (await page.request.get("/api/events")).json();
