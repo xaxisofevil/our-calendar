@@ -349,10 +349,6 @@ function App() {
         </div>
 
         <div className="flex items-center gap-1.5">
-          {/* ARCHITECTURE.md §9 (M7) — push-to-talk voice capture. Self-
-              contained (see VoiceButton.tsx's own header comment for why),
-              so mounting it here is the entire wiring this needs. */}
-          <VoiceButton />
           <button
             type="button"
             onClick={previewNotifPrompt}
@@ -444,6 +440,12 @@ function App() {
       </ExpandedPanelModal>
 
       <NotificationPrompt open={notifPromptOpen} onDismiss={dismissNotifPrompt} onEnable={handleEnableNotifications} />
+
+      {/* ARCHITECTURE.md §9 (M7) — push-to-talk voice capture. Mounted as a
+          top-level sibling (like NotificationPrompt above), not inside the
+          header — VoiceButton.tsx portals its entire visible output to
+          document.body itself, so this mount point is just wiring. */}
+      <VoiceButton />
 
       <AddEventSheet
         open={addEventOpen}
