@@ -95,7 +95,11 @@ function insertEvent(title) {
   }
 }
 
-if (prompt.includes("MOCK_CLAUDE_ERROR")) {
+if (prompt.includes("MOCK_CREATE_THEN_ERROR")) {
+  insertTodo("Must be rolled back (voice test)");
+  process.stderr.write("mock claude cli: simulated crash after tool side effect\n");
+  process.exitCode = 1;
+} else if (prompt.includes("MOCK_CLAUDE_ERROR")) {
   process.stderr.write("mock claude cli: simulated crash\n");
   process.exitCode = 1;
 } else if (prompt.includes("MOCK_PERMISSION_DENIED")) {
@@ -107,6 +111,12 @@ if (prompt.includes("MOCK_CLAUDE_ERROR")) {
   emitEnvelope(nullOutput({ actionTaken: "Added 'Buy milk (voice test)' to the to-do list." }));
 } else if (prompt.includes("MOCK_NEEDS_RESEARCH")) {
   if (model === "sonnet") {
+    // The isolated research tier has WebSearch only and returns facts; it
+    // cannot write or read private calendar data.
+    emitEnvelope({ researchSummary: "Authoritative sources agree game night is tomorrow at 7 PM." });
+  } else if (prompt.includes("<research-summary>")) {
+    // A separate non-web haiku pass consumes those facts and performs the
+    // bounded calendar write.
     insertEvent("Researched Game Night (voice test)");
     emitEnvelope(nullOutput({ actionTaken: "Added 'Researched Game Night (voice test)' after researching it." }));
   } else {

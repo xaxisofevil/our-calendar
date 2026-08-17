@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { confirmVoiceAction, runVoiceCommand, transcribeVoice, undoVoiceBatch } from "./api";
+import { isStandalonePwa } from "./pwa";
 import type { VoiceCommandResult } from "../types";
 
 export type VoiceCaptureStatus = "idle" | "recording" | "uploading" | "commanding" | "done" | "error";
@@ -54,6 +55,10 @@ const MIC_DENIED_MESSAGE = "Microphone access was blocked — allow it for this 
 const NO_MIC_MESSAGE = "No microphone was found on this device.";
 const NO_AUDIO_CAPTURED_MESSAGE = "Didn't catch anything that time — try holding the button a little longer.";
 const GENERIC_MESSAGE = "Something went wrong capturing that. Please try again.";
+const PWA_ONLY_MESSAGE = "Voice input is available only from the installed app.";
+// Privacy backstop: pointer capture is reliable in normal use, but no lost
+// pointer/browser lifecycle edge case may leave a microphone open forever.
+const MAX_RECORDING_MS = 15_000;
 
 function isVoiceCaptureSupported(): boolean {
   return (
@@ -112,20 +117,32 @@ export function useVoiceCapture() {
   const chunksRef = useRef<Blob[]>([]);
   const activeRef = useRef(false); // true from the moment start() is called until upload+command settle
   const pendingStopRef = useRef(false);
+  const pendingMediaRef = useRef(false);
+  const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptRef = useRef(0);
+  const mountedRef = useRef(true);
 
   const releaseStream = useCallback(() => {
+    if (recordingTimerRef.current !== null) {
+      clearTimeout(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }, []);
 
   const finishRecording = useCallback(
     (recorder: MediaRecorder) => {
+      if (recorder.state === "inactive") return;
+      const attempt = attemptRef.current;
+
       recorder.onstop = () => {
         releaseStream();
-        recorderRef.current = null;
+        if (recorderRef.current === recorder) recorderRef.current = null;
 
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         chunksRef.current = [];
+        if (!mountedRef.current || attemptRef.current !== attempt) return;
 
         if (blob.size === 0) {
           activeRef.current = false;
@@ -136,9 +153,8 @@ export function useVoiceCapture() {
         setState({ ...IDLE_STATE, status: "uploading" });
         transcribeVoice(blob)
           .then(async ({ transcript }) => {
+            if (!mountedRef.current || attemptRef.current !== attempt) return;
             if (!transcript.trim()) {
-              // §9's original "didn't catch that" case — nothing for the
-              // command layer to act on.
               activeRef.current = false;
               setState({ ...IDLE_STATE, status: "done", transcript });
               return;
@@ -147,30 +163,32 @@ export function useVoiceCapture() {
             setState({ ...IDLE_STATE, status: "commanding", transcript });
             const phaseTimers = COMMANDING_PHASE_THRESHOLDS_MS.map((ms, i) =>
               setTimeout(() => {
-                // Guard against a stray timer firing after the request already
-                // settled and moved state on (e.g. a very fast response
-                // landing right as a later threshold's timer was queued).
+                if (!mountedRef.current || attemptRef.current !== attempt) return;
                 setState((s) => (s.status === "commanding" ? { ...s, commandingPhase: i + 1 } : s));
               }, ms),
             );
             try {
               const commandResult = await runVoiceCommand(transcript);
               phaseTimers.forEach(clearTimeout);
+              if (!mountedRef.current || attemptRef.current !== attempt) return;
               activeRef.current = false;
               if (commandResult.outcome === "executed") refreshData();
-              setState({ ...IDLE_STATE, status: "done", transcript, commandResult });
+              // The transcript is no longer needed once a structured result
+              // exists; do not retain household speech in component state.
+              setState({ ...IDLE_STATE, status: "done", commandResult });
             } catch (err) {
               phaseTimers.forEach(clearTimeout);
+              if (!mountedRef.current || attemptRef.current !== attempt) return;
               activeRef.current = false;
               setState({
                 ...IDLE_STATE,
                 status: "error",
-                transcript,
                 errorMessage: err instanceof Error ? err.message : GENERIC_MESSAGE,
               });
             }
           })
           .catch((err: unknown) => {
+            if (!mountedRef.current || attemptRef.current !== attempt) return;
             activeRef.current = false;
             setState({
               ...IDLE_STATE,
@@ -179,26 +197,44 @@ export function useVoiceCapture() {
             });
           });
       };
-      recorder.stop();
+
+      try {
+        recorder.stop();
+      } catch {
+        releaseStream();
+        recorderRef.current = null;
+        chunksRef.current = [];
+        activeRef.current = false;
+        if (mountedRef.current) setState({ ...IDLE_STATE, status: "error", errorMessage: GENERIC_MESSAGE });
+      }
     },
     [releaseStream, refreshData],
   );
 
   const start = useCallback(async () => {
+    if (!isStandalonePwa()) {
+      setState({ ...IDLE_STATE, status: "error", errorMessage: PWA_ONLY_MESSAGE });
+      return;
+    }
     if (!isVoiceCaptureSupported()) {
       setState({ ...IDLE_STATE, status: "error", errorMessage: UNSUPPORTED_MESSAGE });
       return;
     }
-    if (activeRef.current) return; // already recording/uploading/commanding — a stray duplicate press
+    if (activeRef.current) return;
 
+    const attempt = ++attemptRef.current;
     activeRef.current = true;
     pendingStopRef.current = false;
     setState({ ...IDLE_STATE, status: "recording" });
 
     let stream: MediaStream;
+    pendingMediaRef.current = true;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      pendingMediaRef.current = false;
     } catch (err) {
+      pendingMediaRef.current = false;
+      if (!mountedRef.current || attemptRef.current !== attempt) return;
       activeRef.current = false;
       const name = (err as { name?: string } | undefined)?.name;
       const message =
@@ -211,47 +247,115 @@ export function useVoiceCapture() {
       return;
     }
 
+    // Permission can resolve after release, backgrounding, or unmount.
+    // A stale stream is stopped before it is ever attached to a recorder.
+    if (!mountedRef.current || attemptRef.current !== attempt || !activeRef.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
     streamRef.current = stream;
     chunksRef.current = [];
-    const recorder = new MediaRecorder(stream);
-    recorderRef.current = recorder;
-    recorder.ondataavailable = (e: BlobEvent) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-    recorder.start();
+    try {
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (e: BlobEvent) => {
+        if (attemptRef.current === attempt && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onerror = () => {
+        releaseStream();
+        recorderRef.current = null;
+        chunksRef.current = [];
+        activeRef.current = false;
+        if (mountedRef.current && attemptRef.current === attempt) {
+          setState({ ...IDLE_STATE, status: "error", errorMessage: GENERIC_MESSAGE });
+        }
+      };
+      recorder.start();
+      recordingTimerRef.current = setTimeout(() => finishRecording(recorder), MAX_RECORDING_MS);
 
-    // The button was already released while the permission prompt/
-    // getUserMedia call was still in flight — honor that stop now instead
-    // of leaving the recording running until the next press.
-    if (pendingStopRef.current) {
-      pendingStopRef.current = false;
-      finishRecording(recorder);
+      if (pendingStopRef.current) {
+        pendingStopRef.current = false;
+        finishRecording(recorder);
+      }
+    } catch {
+      releaseStream();
+      recorderRef.current = null;
+      chunksRef.current = [];
+      activeRef.current = false;
+      if (mountedRef.current && attemptRef.current === attempt) {
+        setState({ ...IDLE_STATE, status: "error", errorMessage: GENERIC_MESSAGE });
+      }
     }
-  }, [finishRecording]);
+  }, [finishRecording, releaseStream]);
 
   const stop = useCallback(() => {
     if (!activeRef.current) return;
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === "inactive") {
-      // Recording hasn't actually started yet (still awaiting the
-      // permission prompt) — start() will call finishRecording() itself as
-      // soon as it does.
       pendingStopRef.current = true;
       return;
     }
     finishRecording(recorder);
   }, [finishRecording]);
 
+  useEffect(() => {
+    const stopIfHidden = () => {
+      if (document.visibilityState !== "hidden") return;
+      if (pendingMediaRef.current) {
+        // Cancel permission acquisition outright. If it resolves later,
+        // the attempt-id check stops the returned tracks immediately.
+        pendingMediaRef.current = false;
+        pendingStopRef.current = false;
+        activeRef.current = false;
+        attemptRef.current++;
+        if (mountedRef.current) setState(IDLE_STATE);
+        return;
+      }
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") stop();
+    };
+    document.addEventListener("visibilitychange", stopIfHidden);
+    return () => document.removeEventListener("visibilitychange", stopIfHidden);
+  }, [stop]);
+
+  // Mutable media refs are intentionally read at teardown: they represent
+  // the resources current at unmount, not values from effect setup.
+  // oxlint-disable react-hooks/exhaustive-deps
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      attemptRef.current++;
+      activeRef.current = false;
+      pendingStopRef.current = false;
+      pendingMediaRef.current = false;
+      const recorder = recorderRef.current;
+      recorderRef.current = null;
+      if (recorder && recorder.state !== "inactive") {
+        try {
+          recorder.stop();
+        } catch {
+          // Stream cleanup below is the privacy boundary even if recorder
+          // shutdown itself fails.
+        }
+      }
+      chunksRef.current = [];
+      releaseStream();
+    };
+  }, [releaseStream]);
+  // oxlint-enable react-hooks/exhaustive-deps
+
   const reset = useCallback(() => {
     setState(IDLE_STATE);
   }, []);
 
   const confirmAction = useCallback(async () => {
-    const action = state.commandResult?.proposedAction;
-    if (!action) return;
+    const confirmationId = state.commandResult?.confirmationId;
+    if (!confirmationId) return;
     setState((s) => ({ ...s, actionBusy: true }));
     try {
-      await confirmVoiceAction(action);
+      await confirmVoiceAction(confirmationId);
       refreshData();
       setState((s) => ({ ...s, actionBusy: false, actionNote: "Done — that's been applied.", commandResult: null }));
     } catch (err) {

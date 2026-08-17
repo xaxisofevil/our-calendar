@@ -102,8 +102,10 @@ export default defineConfig({
       // below — see e2e/helpers.ts's E2E_DEEPGRAM_API_KEY comment and
       // e2e/mock-deepgram-server.mjs.
       env: {
+        NODE_ENV: "development",
         PORT: String(BACKEND_PORT),
         AUTH_PASSCODE: E2E_AUTH_PASSCODE,
+        VOICE_RATE_LIMIT_DISABLED: "1",
         VAPID_PUBLIC_KEY: E2E_VAPID_PUBLIC_KEY,
         VAPID_PRIVATE_KEY: E2E_VAPID_PRIVATE_KEY,
         REMINDER_SCAN_INTERVAL_MS: String(E2E_REMINDER_SCAN_INTERVAL_MS),
@@ -115,6 +117,7 @@ export default defineConfig({
         CLAUDE_CODE_OAUTH_TOKEN: E2E_CLAUDE_CODE_OAUTH_TOKEN,
         CLAUDE_CLI_COMMAND: process.execPath,
         CLAUDE_CLI_ARGS_PREFIX: mockClaudeCliPath,
+        CLAUDE_MCP_CONFIG_PATH: "",
       },
       reuseExistingServer: false,
       timeout: 30_000,
@@ -165,8 +168,17 @@ export default defineConfig({
       cwd: "./backend",
       url: `http://localhost:${VOICE_UNCONFIGURED_BACKEND_PORT}/api/health`,
       env: {
+        NODE_ENV: "development",
         PORT: String(VOICE_UNCONFIGURED_BACKEND_PORT),
         DB_DIR_NAME: "data-e2e-voice-unconfigured",
+        AUTH_PASSCODE: "",
+        DEEPGRAM_API_KEY: "",
+        DEEPGRAM_API_URL: "",
+        CLAUDE_CODE_OAUTH_TOKEN: "",
+        CLAUDE_CLI_COMMAND: "",
+        CLAUDE_CLI_ARGS_PREFIX: "",
+        CLAUDE_MCP_CONFIG_PATH: "",
+        VOICE_RATE_LIMIT_DISABLED: "1",
       },
       reuseExistingServer: false,
       timeout: 30_000,

@@ -180,6 +180,16 @@ export function updateEvent(id: number, input: unknown): EventDTO {
   const existing = db.select().from(events).where(eq(events.id, id)).get();
   if (!existing) throw new ActionNotFoundError("Event not found");
 
+  // A partial update is semantically validated against the resulting full
+  // event, so changing only startAt cannot leave endAt before it (and vice
+  // versa). This applies equally to REST, MCP, and confirmed voice edits.
+  const combined = createEventSchema.safeParse({
+    ...existing,
+    allDay: Boolean(existing.allDay),
+    ...parsed.data,
+  });
+  if (!combined.success) throw new ActionValidationError(combined.error);
+
   const now = new Date().toISOString();
   db.update(events)
     .set({ ...parsed.data, updatedAt: now })

@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import os from "node:os";
 
 // ARCHITECTURE.md §10/§12 (M8) — a thin wrapper around headless Claude Code
@@ -32,8 +33,8 @@ import os from "node:os";
  * metered per-token API billing, the exact thing §10's Ollama correction
  * was written to avoid losing again. */
 export class ClaudeCliConfigError extends Error {
-  constructor() {
-    super("CLAUDE_CODE_OAUTH_TOKEN is not set — see backend/.env.example.");
+  constructor(message = "CLAUDE_CODE_OAUTH_TOKEN is not set — see backend/.env.example.") {
+    super(message);
     this.name = "ClaudeCliConfigError";
   }
 }
@@ -43,6 +44,7 @@ export type ClaudeCliErrorReason =
   | "timeout" // ran longer than allowed and was killed
   | "nonzero_exit" // process exited non-zero
   | "invalid_output" // stdout wasn't parseable as the expected JSON envelope
+  | "output_too_large" // bounded child output exceeded the in-memory safety cap
   | "permission_denied" // envelope's permission_denials was non-empty — §10's real gotcha
   | "model_error"; // envelope reported is_error: true
 
@@ -156,13 +158,11 @@ function resolveCommand(): { command: string; prefixArgs: string[] } {
 // which resolves `DB_DIR_NAME` relative to the wrong checkout entirely —
 // once landing in an unmonitored stray file, and once (a separate mistake,
 // a one-off manual script that didn't set `DB_DIR_NAME` at all) landing in
-// the real production database. `CLAUDE_MCP_CONFIG_PATH`, set only for
-// isolated test runs (never in production), adds `--strict-mcp-config
-// --mcp-config <path>` — `--strict-mcp-config` disables auto-discovery of
-// the user-scoped registration entirely, so a test invocation can only ever
-// reach whatever server the given config file actually defines. Point that
-// file at a server still *named* "our-calendar" (just with its command/args
-// pointing at the worktree's own build) so `voiceCommand.ts`'s
+// the real production database. `CLAUDE_MCP_CONFIG_PATH` adds
+// `--strict-mcp-config --mcp-config <path>`; production now requires this
+// same pinned mechanism instead of ambient user-scope discovery. Point the
+// file at a server still *named* "our-calendar" (with an absolute command
+// and build path) so `voiceCommand.ts`'s
 // `--allowedTools` list (`mcp__our-calendar__*`) needs no test-vs-prod
 // branching at all — only which binary "our-calendar" resolves to changes.
 function resolveMcpConfigArgs(): string[] {
@@ -171,6 +171,7 @@ function resolveMcpConfigArgs(): string[] {
 }
 
 const DEFAULT_TIMEOUT_MS = 45_000;
+const MAX_CAPTURED_OUTPUT_BYTES = 1_000_000;
 
 /**
  * Runs one headless `claude -p` invocation forced into `options.jsonSchema`
@@ -188,9 +189,9 @@ const DEFAULT_TIMEOUT_MS = 45_000;
  * entirely, without needing `--bare` (which would also stop
  * `CLAUDE_CODE_OAUTH_TOKEN` from being read at all — see
  * `ClaudeCliConfigError`'s comment on why that's the one thing this can't
- * give up). The `our-calendar` MCP server is registered at *user* config
- * scope (ARCHITECTURE.md §10a), so it's still auto-discovered regardless
- * of cwd.
+ * give up). MCP discovery is independently pinned by
+ * `--strict-mcp-config`; `CLAUDE_MCP_CONFIG_PATH` is mandatory in
+ * production.
  *
  * Throws `ClaudeCliConfigError` if `CLAUDE_CODE_OAUTH_TOKEN` isn't set, or
  * `ClaudeCliError` for every other way this can fail to produce a usable
@@ -203,6 +204,14 @@ export async function runClaudeCommand(
 ): Promise<unknown> {
   const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   if (!token) throw new ClaudeCliConfigError();
+
+  const mcpConfigPath = process.env.CLAUDE_MCP_CONFIG_PATH;
+  if (process.env.NODE_ENV === "production" && !mcpConfigPath) {
+    throw new ClaudeCliConfigError("CLAUDE_MCP_CONFIG_PATH is required in production.");
+  }
+  if (mcpConfigPath && !existsSync(mcpConfigPath)) {
+    throw new ClaudeCliConfigError("CLAUDE_MCP_CONFIG_PATH does not exist.");
+  }
 
   const { command, prefixArgs } = resolveCommand();
   const args = [
@@ -261,8 +270,25 @@ export async function runClaudeCommand(
 
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (chunk) => (stdout += chunk));
-    child.stderr?.on("data", (chunk) => (stderr += chunk));
+    const appendOutput = (target: "stdout" | "stderr", chunk: Buffer | string) => {
+      if (settled) return;
+      const text = String(chunk);
+      if (target === "stdout") stdout += text;
+      else stderr += text;
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_CAPTURED_OUTPUT_BYTES) {
+        settle(() => {
+          clearTimeout(timer);
+          try {
+            child.kill();
+          } catch {
+            // already gone
+          }
+          reject(new ClaudeCliError("output_too_large", "Claude Code produced too much output."));
+        });
+      }
+    };
+    child.stdout?.on("data", (chunk) => appendOutput("stdout", chunk));
+    child.stderr?.on("data", (chunk) => appendOutput("stderr", chunk));
 
     child.on("error", (err) => {
       settle(() => {

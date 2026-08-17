@@ -13,6 +13,7 @@ import { friendlyErrorMessage } from "./lib/errors";
 import { useAuthGate } from "./lib/auth";
 import { useImminentEventKeys } from "./lib/imminent";
 import { enablePushNotifications } from "./lib/push";
+import { isStandalonePwa } from "./lib/pwa";
 import { useLiveSync } from "./lib/useLiveSync";
 import { useAutoCollapse } from "./lib/useAutoCollapse";
 import { useMediaQuery } from "./lib/useMediaQuery";
@@ -441,11 +442,12 @@ function App() {
 
       <NotificationPrompt open={notifPromptOpen} onDismiss={dismissNotifPrompt} onEnable={handleEnableNotifications} />
 
-      {/* ARCHITECTURE.md §9 (M7) — push-to-talk voice capture. Mounted as a
-          top-level sibling (like NotificationPrompt above), not inside the
-          header — VoiceButton.tsx portals its entire visible output to
-          document.body itself, so this mount point is just wiring. */}
-      <VoiceButton />
+      {/* Voice is deliberately available only in installed standalone PWA
+          display mode. This is a product/privacy gate against accidental
+          browser-tab use, not server-verifiable authorization (normal tabs
+          and installed PWAs share an origin and often mic permission). The
+          capture hook repeats the same check as defense in depth. */}
+      {isStandalonePwa() && <VoiceButton />}
 
       <AddEventSheet
         open={addEventOpen}

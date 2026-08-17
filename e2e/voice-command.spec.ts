@@ -81,6 +81,17 @@ test.describe("POST /api/voice/command", () => {
     expect(typeof body.error).toBe("string");
   });
 
+  test("rolls back MCP writes when the model fails after a tool side effect", async ({ page }) => {
+    const res = await page.request.post("/api/voice/command", {
+      data: { transcript: "MOCK_CREATE_THEN_ERROR verify rollback" },
+    });
+    expect(res.status()).toBe(200);
+    expect((await res.json()).outcome).toBe("error");
+
+    const todos = await (await page.request.get("/api/todos")).json();
+    expect(todos.some((todo: { text: string }) => todo.text === "Must be rolled back (voice test)")).toBe(false);
+  });
+
   test("rejects an empty transcript with a 400 before ever invoking the model", async ({ page }) => {
     const res = await page.request.post("/api/voice/command", { data: { transcript: "" } });
     expect(res.status()).toBe(400);
@@ -123,31 +134,40 @@ test.describe("POST /api/voice/confirm", () => {
     expect(commandRes.status()).toBe(200);
     const commandBody = await commandRes.json();
     expect(commandBody.outcome).toBe("needs_confirmation");
-    expect(commandBody.proposedAction).toEqual({
+    expect(commandBody.proposedAction).toMatchObject({
       type: "delete_event",
       targetId: created.id,
-      summary: "Delete the test event (voice test)",
       details: {},
     });
+    expect(commandBody.proposedAction.summary).toContain("Dentist appointment (voice test)");
+    expect(commandBody.proposedAction.summary).not.toBe("Delete the test event (voice test)");
+    expect(commandBody.confirmationId).toMatch(/^[0-9a-f-]{36}$/i);
 
     // Nothing was deleted yet — the proposal alone must never execute.
     const eventsBeforeConfirm = await (await page.request.get("/api/events")).json();
     expect(eventsBeforeConfirm.some((e: { id: number }) => e.id === created.id)).toBe(true);
 
-    // The frontend echoes back the exact proposed action (stateless
-    // confirm design — see routes/voice.ts's own comment on why).
-    const confirmRes = await page.request.post("/api/voice/confirm", { data: commandBody.proposedAction });
+    // Confirmation executes only a server-issued, session-bound, one-time
+    // id; the client cannot alter executable target/details.
+    const confirmRes = await page.request.post("/api/voice/confirm", {
+      data: { confirmationId: commandBody.confirmationId },
+    });
     expect(confirmRes.status()).toBe(200);
     expect((await confirmRes.json()).outcome).toBe("executed");
+
+    const replayRes = await page.request.post("/api/voice/confirm", {
+      data: { confirmationId: commandBody.confirmationId },
+    });
+    expect(replayRes.status()).toBe(410);
 
     const eventsAfterConfirm = await (await page.request.get("/api/events")).json();
     expect(eventsAfterConfirm.some((e: { id: number }) => e.id === created.id)).toBe(false);
   });
 
-  test("confirming a target id that no longer exists returns 404, not a crash", async ({ page }) => {
+  test("rejects an invented confirmation id without accepting executable action fields", async ({ page }) => {
     const res = await page.request.post("/api/voice/confirm", {
-      data: { type: "delete_event", targetId: 999_999_999, summary: "doesn't exist", details: {} },
+      data: { confirmationId: "00000000-0000-4000-8000-000000000000" },
     });
-    expect(res.status()).toBe(404);
+    expect(res.status()).toBe(410);
   });
 });

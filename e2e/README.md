@@ -43,17 +43,9 @@ API — there is no real key available yet (see ARCHITECTURE.md §9). Its
 primary backend's config mid-suite — see `playwright.config.ts`'s comments
 on both extra processes.
 
-`voice-auto-confirm.spec.ts` (ARCHITECTURE.md §10b, M8a) covers the
-auto-listen confirm feature layered on top of `voice-command.spec.ts`'s
-manual Confirm/Cancel — a clear "yes"/"no" auto-firing the same
-confirm/cancel path the manual buttons use, silence/low-confidence leaving
-the manual buttons untouched, and a `getUserMedia` failure during
-auto-listen (as opposed to the initial recording) degrading silently.
-Mocks `getUserMedia`/`MediaRecorder` with a *sequence* of fake clips (one
-per recording in a test — the initial press-and-hold, then the
-self-triggered auto-listen one), and overrides the auto-listen hook's
-recording-length cap via a documented `window.__AUTO_LISTEN_MAX_MS__`
-test-only seam so tests don't wait out a real 10-second window.
+Destructive voice proposals are covered through the manual Confirm/Cancel
+flow only. The former no-new-gesture auto-listen confirmation feature was
+removed during the pre-merge privacy audit, along with its dedicated test.
 
 ## Running
 
