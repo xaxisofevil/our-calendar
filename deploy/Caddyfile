@@ -27,7 +27,15 @@ ericb.duckdns.org:8443 {
 	# microphone=(self) prevents delegation to embedded cross-origin frames;
 	# explicit in-app gestures remain the primary same-origin privacy gate.
 	header {
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+		# frame-src carves out exactly one exception to the same-origin-only
+		# policy above: Home Assistant's own dashboard (HaDashboardButton.tsx,
+		# frontend), embedded in an iframe so its own idle-timeout can stay in
+		# control (App.tsx can't run a JS timer across a real page navigation).
+		# HA is still explicitly out-of-scope infrastructure this app doesn't
+		# otherwise talk to (ARCHITECTURE.md §2/§6) — this is the one deliberate,
+		# narrow hole in that boundary, scoped to exactly HA's own origin, not a
+		# wildcard.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-src 'self' https://ericb.duckdns.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 		Permissions-Policy "microphone=(self), camera=(), geolocation=()"
 		Referrer-Policy "no-referrer"
 		X-Content-Type-Options "nosniff"
