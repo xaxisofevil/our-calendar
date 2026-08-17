@@ -8,6 +8,7 @@ import { ExpandedPanelModal } from "./components/ExpandedPanelModal";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { PasscodeScreen } from "./components/PasscodeScreen";
 import { VoiceButton } from "./components/VoiceButton";
+import { HaDashboardButton } from "./components/HaDashboardButton";
 import { dateKey, gridRange, isSameMonth, monthTitle, nextMonth, previousMonth } from "./lib/dateUtils";
 import { friendlyErrorMessage } from "./lib/errors";
 import { useAuthGate } from "./lib/auth";
@@ -350,6 +351,7 @@ function App() {
         </div>
 
         <div className="flex items-center gap-1.5">
+          <HaDashboardButton />
           <button
             type="button"
             onClick={previewNotifPrompt}
