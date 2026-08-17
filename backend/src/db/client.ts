@@ -39,6 +39,7 @@ sqlite.exec(`
     completed     INTEGER NOT NULL DEFAULT 0,
     list          TEXT NOT NULL DEFAULT 'household',
     position      INTEGER NOT NULL,
+    batch_id      TEXT,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
   );
@@ -61,6 +62,7 @@ sqlite.exec(`
     end_at             TEXT NOT NULL,
     all_day            INTEGER NOT NULL DEFAULT 0,
     recurrence_rule    TEXT,
+    batch_id           TEXT,
     updated_at         TEXT NOT NULL
   );
 
@@ -97,6 +99,7 @@ sqlite.exec(`
     sent_at              TEXT NOT NULL,
     PRIMARY KEY (event_id, occurrence_start_at)
   );
+
 `);
 
 // Dev-time migration shims: if an earlier run of this app created a table
@@ -113,6 +116,20 @@ ensureColumn("todos", "notes", "notes TEXT");
 ensureColumn("todos", "due_at", "due_at TEXT");
 ensureColumn("events", "person_id", "person_id INTEGER REFERENCES people(id)");
 ensureColumn("events", "recurrence_rule", "recurrence_rule TEXT");
+
+// backend/src/actions/batches.ts (generalized out of the calendar-add skill
+// — see ARCHITECTURE.md §10a-1's "generalizing" note and the batch-undo
+// subsection). Nullable on both tables, NULL for anything created the
+// normal way. Indexed since undoBatch's whole job is "find every row with
+// this batch_id" — without an index that's a full table scan on every undo,
+// harmless today at household-data volumes but cheap to do right from the
+// start rather than retrofit once a table has years of events in it.
+ensureColumn("events", "batch_id", "batch_id TEXT");
+ensureColumn("todos", "batch_id", "batch_id TEXT");
+sqlite.exec(`
+  CREATE INDEX IF NOT EXISTS idx_events_batch_id ON events(batch_id);
+  CREATE INDEX IF NOT EXISTS idx_todos_batch_id ON todos(batch_id);
+`);
 
 // Real bug, found via direct report: a database created before
 // `sent_reminders`'s REFERENCES gained ON DELETE CASCADE (above) has that

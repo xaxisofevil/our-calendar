@@ -6,8 +6,11 @@ import type {
   PushSubscriptionRecord,
   SubscribePushInput,
   TodoRecord,
+  TranscribeVoiceResult,
+  UndoBatchResult,
   UpdateEventInput,
   UpdateTodoInput,
+  VoiceCommandResult,
 } from "../types";
 import { notifyUnauthorized } from "./auth";
 
@@ -86,4 +89,88 @@ export function subscribePush(input: SubscribePushInput): Promise<PushSubscripti
 
 export function unsubscribePush(endpoint: string): Promise<void> {
   return request("/api/push/subscribe", { method: "DELETE", body: JSON.stringify({ endpoint }) });
+}
+
+// ARCHITECTURE.md §9 (M7) — uploads one push-to-talk audio clip (see
+// lib/useVoiceCapture.ts). Deliberately not built on request() above: the
+// body is a raw audio Blob, not JSON (request() always sets
+// "Content-Type: application/json" and JSON.stringify()s its body), and
+// request()'s error path always JSON.stringify()s `body.error` before
+// throwing — fine for the zod `fieldErrors` shape every other route
+// returns, but routes/voice.ts's errors are already a single plain,
+// human-readable string ("Voice transcription isn't set up yet.", etc.),
+// so this throws that string directly rather than re-wrapping it in extra
+// quotes friendlyErrorMessage was never meant to unwrap.
+export async function transcribeVoice(blob: Blob): Promise<TranscribeVoiceResult> {
+  let res: Response;
+  try {
+    res = await fetch("/api/voice/transcribe", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": blob.type || "application/octet-stream" },
+      body: blob,
+    });
+  } catch {
+    throw new Error("Couldn't reach the server — check your connection and try again.");
+  }
+
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(typeof body?.error === "string" ? body.error : "Couldn't transcribe that — please try again.");
+  }
+  return res.json() as Promise<TranscribeVoiceResult>;
+}
+
+// ARCHITECTURE.md §10/§12 (M8) — takes a transcript (from transcribeVoice
+// above) and actually acts on it. Not built on request() for the same
+// reason transcribeVoice above isn't: POST /api/voice/command's one
+// non-200 case (CLAUDE_CODE_OAUTH_TOKEN missing) returns a plain string in
+// `error` (routes/voice.ts mirrors DeepgramConfigError's handling exactly),
+// which request()'s error path would double-quote via JSON.stringify()
+// the same way it would for /transcribe's errors. Every other outcome —
+// including a failed voice command — is still a normal 200 with a
+// `VoiceCommandResult` body (see lib/voiceCommand.ts's own comment on why
+// a per-command failure is a value, not a thrown exception), so this
+// function's return type is just that result, not something wrapped for
+// error-vs-success branching the way most of this app's mutations are.
+export async function runVoiceCommand(transcript: string): Promise<VoiceCommandResult> {
+  let res: Response;
+  try {
+    res = await fetch("/api/voice/command", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript }),
+    });
+  } catch {
+    throw new Error("Couldn't reach the server — check your connection and try again.");
+  }
+
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(
+      typeof body?.error === "string" ? body.error : "Couldn't run that voice command — please try again.",
+    );
+  }
+  return body as VoiceCommandResult;
+}
+
+// Executes a previously-proposed destructive action by opaque, short-lived,
+// server-issued confirmation id. Executable target/details never make a
+// client-controlled round trip through this endpoint.
+export function confirmVoiceAction(confirmationId: string): Promise<{ outcome: "executed" }> {
+  return request("/api/voice/confirm", { method: "POST", body: JSON.stringify({ confirmationId }) });
+}
+
+// ARCHITECTURE.md §10a-2/§10/§12 (M8) — undoes everything a given voice
+// command created (actions/batches.ts's `undoBatch`, exposed here as
+// §10a-2's own deferred "not built here, and left for §10/M8" HTTP surface).
+export function undoVoiceBatch(batchId: string): Promise<UndoBatchResult> {
+  return request("/api/voice/undo", { method: "POST", body: JSON.stringify({ batchId }) });
 }

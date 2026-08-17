@@ -5,3 +5,4 @@ export * from "./events.js";
 export * from "./todos.js";
 export * from "./people.js";
 export * from "./push.js";
+export * from "./batches.js";

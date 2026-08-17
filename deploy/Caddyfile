@@ -22,6 +22,18 @@ ericb.duckdns.org:8443 {
 		dns duckdns {env.DUCKDNS_API_TOKEN}
 	}
 
+	# Frontend security headers are set here, not in Helmet: Caddy serves
+	# index.html/assets directly, so backend middleware never sees them.
+	# microphone=(self) prevents delegation to embedded cross-origin frames;
+	# explicit in-app gestures remain the primary same-origin privacy gate.
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+		Permissions-Policy "microphone=(self), camera=(), geolocation=()"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
 	handle /api/* {
 		reverse_proxy localhost:3001
 	}

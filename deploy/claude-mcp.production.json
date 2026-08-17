@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "our-calendar": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\ericm\\projects\\our-calendar\\backend\\dist\\mcp\\server.js"
+      ]
+    }
+  }
+}

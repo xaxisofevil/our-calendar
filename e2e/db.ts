@@ -90,3 +90,4 @@ export function countPushSubscriptions(endpoint: string): number {
     db.close();
   }
 }
+

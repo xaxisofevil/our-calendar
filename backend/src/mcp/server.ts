@@ -61,6 +61,44 @@ function runAction<T>(fn: () => T) {
   }
 }
 
+// ARCHITECTURE.md §10/§12 (M8) — reconciling "the LLM calls create_event/
+// add_todo directly" with "every row this command creates needs the same
+// batch id for undo" (§10a-2). Read once at process startup (this server
+// process lives for exactly one `claude -p` invocation's duration — see
+// lib/voiceCommand.ts's comment on why): when the voice command layer
+// spawns `claude`, it sets VOICE_COMMAND_BATCH_ID on that child process's
+// env, which Claude Code's own MCP-server-spawning inherits down to this
+// process the same way any child process inherits its parent's env unless
+// overridden. Every create_event/add_todo call made through *this*
+// server instance is tagged with it automatically — the model never sees
+// or sets a batch id itself, so there's nothing for it to get wrong or
+// need to be told to echo back.
+//
+// undefined for every other caller of this same server (a human typing a
+// request directly at `claude`, the interactive case this server was
+// originally built for in §10a) — those creates are untagged, exactly as
+// before this existed. This is the one piece of §10/M8 that lives outside
+// backend/src/lib/voiceCommand.ts itself, because the reconciliation only
+// works if the tagging happens inside the same process that actually
+// receives the tool call — see ARCHITECTURE.md's M8 Implementation note
+// for the fuller reasoning, including the honest caveat that this
+// specific env-inheritance chain (backend -> claude -p -> this server)
+// hasn't yet been exercised against a real `claude` binary (no real
+// CLAUDE_CODE_OAUTH_TOKEN was available while this was built — see that
+// same note).
+const voiceCommandBatchId = process.env.VOICE_COMMAND_BATCH_ID || undefined;
+const MAX_VOICE_CREATES = 20;
+let voiceCreateCount = 0;
+
+function runCreate<T>(fn: () => T) {
+  if (voiceCommandBatchId && voiceCreateCount >= MAX_VOICE_CREATES) {
+    return errorResult(`Voice commands may create at most ${MAX_VOICE_CREATES} items.`);
+  }
+  const result = runAction(fn);
+  if (voiceCommandBatchId && !("isError" in result)) voiceCreateCount++;
+  return result;
+}
+
 const server = new McpServer({ name: "our-calendar", version: "0.1.0" });
 
 const idSchema = z.object({ id: z.number().int().describe("Row id") });
@@ -103,7 +141,7 @@ server.registerTool(
       "Create a new calendar event. Set recurrenceRule to a bare RFC 5545 RRULE string (e.g. \"FREQ=WEEKLY;BYDAY=TH\") to make it recurring; omit it for a one-off event.",
     inputSchema: createEventSchema,
   },
-  async (args) => runAction(() => createEvent(args)),
+  async (args) => runCreate(() => createEvent(args, voiceCommandBatchId)),
 );
 
 server.registerTool(
@@ -150,7 +188,7 @@ server.registerTool(
     description: "Add a new item to the shared household to-do list.",
     inputSchema: createTodoSchema,
   },
-  async (args) => runAction(() => addTodo(args)),
+  async (args) => runCreate(() => addTodo(args, voiceCommandBatchId)),
 );
 
 server.registerTool(

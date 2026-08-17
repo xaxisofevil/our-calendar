@@ -84,3 +84,35 @@ export interface PushSubscriptionRecord {
   deviceLabel: string | null;
   createdAt: string;
 }
+
+// ARCHITECTURE.md §10/§12 (M8) — mirrors backend/src/lib/validation.ts's
+// `proposedDestructiveActionSchema`. Never executed directly by the
+// frontend — this is exactly what gets echoed back to
+// POST /api/voice/confirm unchanged (see lib/api.ts's `confirmVoiceAction`).
+export interface ProposedDestructiveAction {
+  type: "delete_event" | "update_event" | "delete_todo" | "update_todo";
+  targetId: number;
+  summary: string;
+  details: Record<string, unknown>;
+}
+
+// Mirrors backend/src/lib/voiceCommand.ts's `VoiceCommandResult`.
+export interface VoiceCommandResult {
+  outcome: "executed" | "needs_confirmation" | "no_action" | "error";
+  modelTier: "haiku" | "haiku+sonnet-research";
+  batchId?: string;
+  summary?: string;
+  proposedAction?: ProposedDestructiveAction;
+  confirmationId?: string;
+  error?: string;
+}
+
+export interface UndoBatchResult {
+  batchId: string;
+  deletedEvents: number;
+  deletedTodos: number;
+}
+
+export interface TranscribeVoiceResult {
+  transcript: string;
+}

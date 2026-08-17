@@ -7,9 +7,18 @@ import { todosRouter } from "./routes/todos.js";
 import { streamRouter } from "./routes/stream.js";
 import { authRouter } from "./routes/auth.js";
 import { pushRouter } from "./routes/push.js";
+import { voiceRouter } from "./routes/voice.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { scanAndSendReminders } from "./lib/reminders.js";
 import { REMINDER_SCAN_INTERVAL_MS } from "./lib/constants.js";
+
+// Remote production must never silently fall back to an unauthenticated
+// calendar because a PM2/environment value was omitted. Local development
+// retains the documented no-passcode escape hatch, but production fails
+// closed before opening a listening socket.
+if (process.env.NODE_ENV === "production" && !process.env.AUTH_PASSCODE) {
+  throw new Error("AUTH_PASSCODE is required when NODE_ENV=production; refusing to start unauthenticated.");
+}
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
@@ -80,10 +89,18 @@ app.use("/api/events", eventsRouter);
 app.use("/api/todos", todosRouter);
 app.use("/api/people", peopleRouter);
 app.use("/api/push", pushRouter);
+// ARCHITECTURE.md §9 (M7) — POST /api/voice/transcribe. Behind the same
+// requireAuth gate as every other /api/* route (mounted above, §5/§12).
+app.use("/api/voice", voiceRouter);
 
 // Minimal error handler so a thrown/rejected handler returns JSON, not an
 // HTML stack trace, to a frontend that only ever expects JSON.
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (status === 413) {
+    res.status(413).json({ error: "Request body is too large." });
+    return;
+  }
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 });

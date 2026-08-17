@@ -25,6 +25,27 @@ export const E2E_VAPID_PUBLIC_KEY =
 export const E2E_VAPID_PRIVATE_KEY = "ut6Odyp-DpfITiE8RZd-myT2VD06g-nFLZw2-ppPJWU";
 
 /**
+ * ARCHITECTURE.md §9 (M7) — a fake Deepgram API key, configured for the
+ * isolated e2e backend only, which is pointed at a local mock server
+ * (e2e/mock-deepgram-server.mjs) instead of the real Deepgram API — there
+ * is no real DEEPGRAM_API_KEY available yet (see §9's own "Implementation"
+ * note). Never sent to any real Deepgram endpoint; not tied to any account.
+ */
+export const E2E_DEEPGRAM_API_KEY = "e2e-fake-deepgram-key-do-not-use-for-real";
+
+/**
+ * ARCHITECTURE.md §10/§12 (M8) — a fake `CLAUDE_CODE_OAUTH_TOKEN`,
+ * configured for the isolated e2e backend only, which is pointed at
+ * e2e/mock-claude-cli.mjs (via CLAUDE_CLI_COMMAND/CLAUDE_CLI_ARGS_PREFIX —
+ * see playwright.config.ts) instead of the real `claude` binary. Only its
+ * *presence* is ever checked by backend/src/lib/claudeCli.ts
+ * (`ClaudeCliConfigError`) — its value is never actually sent anywhere
+ * real, since nothing here spawns a real `claude` process. Never a real
+ * token; not tied to any account.
+ */
+export const E2E_CLAUDE_CODE_OAUTH_TOKEN = "e2e-fake-claude-oauth-token-do-not-use-for-real";
+
+/**
  * §8a's real cadence is 90s (1–2 minutes, see backend/src/lib/constants.ts)
  * — far too slow for a test to wait on. Overridden to a few seconds for
  * this isolated backend only via `REMINDER_SCAN_INTERVAL_MS` (same
