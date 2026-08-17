@@ -27,6 +27,28 @@ import {
 
 export const voiceRouter = Router();
 
+// Operational kill switch, direct request as part of this branch's own
+// pre-merge readiness pass: every other control in this file protects
+// against a bad *request*; this is the one for "we need the whole feature
+// off right now" (a bad rollout, an upstream Claude/Deepgram incident,
+// anything not worth a full backend redeploy to react to). Defaults to
+// enabled — VOICE_ENABLED must be explicitly set to "false" to turn voice
+// off; unset/any other value is the normal, always-on state. Checked first,
+// before rate limiting or route logic, so a disabled deployment does the
+// least possible work per request. The frontend's own voice UI is
+// independent of this (it doesn't poll this state) — this is a backend-only
+// switch flipped via the process environment and a restart, not a live
+// user-facing toggle.
+const voiceEnabled = () => process.env.VOICE_ENABLED !== "false";
+
+voiceRouter.use((req, res, next) => {
+  if (!voiceEnabled()) {
+    res.status(503).json({ error: "Voice commands are temporarily unavailable." });
+    return;
+  }
+  next();
+});
+
 const rateLimitDisabledForTest = () =>
   process.env.NODE_ENV !== "production" && process.env.VOICE_RATE_LIMIT_DISABLED === "1";
 
