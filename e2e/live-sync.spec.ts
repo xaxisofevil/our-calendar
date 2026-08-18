@@ -50,7 +50,7 @@ test.describe("Live sync (SSE)", () => {
     const text = `Synced todo ${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const input1 = page1.getByLabel("Add a to-do item");
     await input1.fill(text);
-    await page1.getByRole("button", { name: "Add item", exact: true }).click();
+    await page1.getByRole("button", { name: /^(Add item|Send)$/ }).click();
 
     await expect(page1.getByRole("checkbox", { name: text, exact: true })).toBeVisible();
     // No reload/interaction on page2 at all — purely SSE-driven.

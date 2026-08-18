@@ -91,7 +91,7 @@ test.describe("Add-todo flow", () => {
       const longText = "Y".repeat(600);
       const input = page.getByLabel("Add a to-do item");
       await input.fill(longText);
-      await page.getByRole("button", { name: "Add item", exact: true }).click();
+      await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
 
       // KNOWN BUG (see QA report): TodoList.submit() clears the input and
       // App.tsx's onAdd fires createTodo.mutate() with no onError/onSuccess

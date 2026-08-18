@@ -115,6 +115,31 @@ function NoteIcon() {
   );
 }
 
+/** Direct request: the quick-add button was a plain "+" regardless of
+ * whether there was anything to submit, leaving it genuinely unclear that
+ * tapping it (or hitting Enter) actually sends the item — "does the
+ * keyboard just make a carriage return?" It can't; this is a single-line
+ * `<input>`, not a `<textarea>`, so Enter only ever does nothing or
+ * submits. The real fix is the button itself, not an explanation: once
+ * there's text to send, it swaps to this arrow (the same visual language
+ * as a messaging app's own send button — matches "as fast as a text
+ * message," the actual bar this was measured against) so the affordance
+ * is obvious without having to ask. */
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-3 w-3" aria-hidden="true">
+      <path
+        d="M10 15.5V4.5M10 4.5 5 9.5M10 4.5l5 5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function CalendarIcon() {
   return (
     <svg viewBox="0 0 14 14" className="h-3 w-3 flex-none" aria-hidden="true">
@@ -411,10 +436,10 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
           <button
             type="button"
             onClick={submit}
-            aria-label="Add item"
+            aria-label={text.trim() ? "Send" : "Add item"}
             className="grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
           >
-            +
+            {text.trim() ? <SendIcon /> : "+"}
           </button>
         </div>
 
