@@ -48,9 +48,11 @@ test.describe("Live sync (SSE)", () => {
     await page2.goto("/");
 
     const text = `Synced todo ${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-    const input1 = page1.getByLabel("Add a to-do item");
-    await input1.fill(text);
-    await page1.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+    await page1.getByLabel("Add a to-do item").click();
+    const dialog1 = page1.getByRole("dialog", { name: "Add a to-do item" });
+    await dialog1.getByLabel("Add a to-do item").fill(text);
+    await dialog1.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+    await page1.keyboard.press("Escape");
 
     await expect(page1.getByRole("checkbox", { name: text, exact: true })).toBeVisible();
     // No reload/interaction on page2 at all — purely SSE-driven.

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import type { PersonRecord, TodoRecord } from "../types";
 import { cx } from "../lib/cx";
@@ -308,6 +309,40 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
     setAddAlsoShared(false);
   }, [listScope]);
 
+  // Direct request: replace the persistent inline quick-add row with a
+  // "+"-triggered modal, matching how AddEventSheet already works — one
+  // "how do I add something" pattern across the app instead of two, and it
+  // reclaims real estate the persistent row + new list chips were both
+  // fighting the actual task list for on mobile. The speed goal this was
+  // built around ("as fast as a text message") doesn't get lost: the
+  // modal's own input still submits through the exact same fast/optimistic
+  // path as before, and — matching a messaging app's own send behavior —
+  // a successful add does NOT close the modal, just clears + refocuses the
+  // input for the next item. Only an explicit close (button/backdrop/
+  // Escape) actually dismisses it, so several items can go in back-to-back
+  // without reopening each time.
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const addInputRef = useRef<HTMLInputElement>(null);
+
+  const closeAddModal = useCallback(() => {
+    setAddModalOpen(false);
+    setText("");
+    setNotes("");
+    setDueDate("");
+    setDetailsOpen(false);
+    setAddScope(listScope);
+    setAddAlsoShared(false);
+  }, [listScope]);
+
+  useEffect(() => {
+    if (!addModalOpen) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") closeAddModal();
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [addModalOpen, closeAddModal]);
+
   // Item 4/5: tapping outside the currently-open swipe reveal (another row,
   // or anywhere else in/outside the list) closes it — same pattern as
   // DayDetailPanel's event rows.
@@ -346,6 +381,11 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
     setNotes("");
     setDueDate("");
     setDetailsOpen(false);
+    // Matches a messaging app's own send behavior — clear + refocus for the
+    // next item rather than closing. Deferred a tick so it runs after
+    // React's own re-render (an immediate synchronous focus() call here can
+    // race the DOM update and silently no-op on some mobile browsers).
+    setTimeout(() => addInputRef.current?.focus(), 0);
   }
 
   function toggleExpanded(id: number) {
@@ -378,7 +418,7 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
     return [...overdueItems, ...rest];
   }, [visibleTodos]);
 
-  return (
+  const sectionContent = (
     <section
       aria-label="Household to-do list"
       className="rounded-[var(--radius-panel)] bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)] md:flex md:h-full md:flex-col"
@@ -418,137 +458,26 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
         </div>
       )}
 
-      <div className="mb-3 flex flex-none flex-col gap-1.5">
-        {/* Real bug, found via direct report with screenshots: onKeyDown's
-            `e.key === "Enter"` check — the only thing wiring the mobile
-            keyboard's action key to submit() — doesn't reliably fire on
-            Android software keyboards (Gboard, Samsung Keyboard, ...): IME
-            composition means the key the *keyboard itself* visibly shows
-            can change (as seen in the report) without a clean, detectable
-            "Enter" keydown ever reaching this code. A real <form onSubmit>
-            sidesteps that entirely — every mobile keyboard's action key
-            reliably fires a form's native submit event at the browser
-            level, independent of however that OS/keyboard combination
-            chooses to represent "Enter" as a raw key event. The button is
-            now type="submit" (not a manual onClick) so tap and
-            keyboard-action-key both go through the exact same path, one
-            source of truth instead of two that can drift apart. */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-          className="flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3"
+      {/* Direct request: this used to be a real, always-visible <input> —
+          now it's a button styled to look exactly like one, so tapping it
+          reads as "tap the text box and start typing" even though what
+          actually happens is a modal opening with the real input inside.
+          The visual continuity is the whole point: the extra tap should be
+          nearly invisible, not a detour. */}
+      <button
+        type="button"
+        onClick={() => setAddModalOpen(true)}
+        aria-label="Add a to-do item"
+        className="mb-3 flex flex-none cursor-pointer items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3 text-left"
+      >
+        <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-ink-faint)]">Add an item…</span>
+        <span
+          aria-hidden="true"
+          className="grid h-[22px] w-[22px] flex-none place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
         >
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Add an item…"
-            aria-label="Add a to-do item"
-            // Tells the OS keyboard what its own action key should look
-            // like/mean, rather than leaving it to guess (which is why it
-            // was showing a generic "next" icon) — "send" reliably gets a
-            // proper send-style key on both Android and iOS.
-            enterKeyHint="send"
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-ink-faint)]"
-          />
-          <button
-            type="submit"
-            aria-label={text.trim() ? "Send" : "Add item"}
-            className="grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
-          >
-            {text.trim() ? <SendIcon /> : "+"}
-          </button>
-        </form>
-
-        {addError && (
-          <p className="rounded-lg bg-[var(--color-accent)]/10 px-2.5 py-1.5 text-[0.68rem] text-[var(--color-accent)]">
-            {addError}
-          </p>
-        )}
-
-        {detailsOpen ? (
-          <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-[var(--color-line)] p-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">Notes (optional)</span>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Notes…"
-                rows={2}
-                autoFocus
-                className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs leading-relaxed outline-none placeholder:text-[var(--color-ink-faint)]"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">Due date (optional)</span>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs outline-none"
-              />
-            </label>
-            {(eric || lindsay) && (
-              <div className="flex flex-col gap-1">
-                <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">List</span>
-                <div className="flex flex-wrap gap-1.5">
-                  <ListScopeChip person={null} active={addScope === "shared"} onClick={() => setAddScope("shared")} />
-                  {eric && (
-                    <ListScopeChip person={eric} active={addScope === eric.id} onClick={() => setAddScope(eric.id)} />
-                  )}
-                  {lindsay && (
-                    <ListScopeChip
-                      person={lindsay}
-                      active={addScope === lindsay.id}
-                      onClick={() => setAddScope(lindsay.id)}
-                    />
-                  )}
-                </div>
-                {addScope !== "shared" && (
-                  <label className="mt-0.5 flex items-center gap-1.5 text-[0.66rem] text-[var(--color-ink-soft)]">
-                    <input
-                      type="checkbox"
-                      checked={addAlsoShared}
-                      onChange={(e) => setAddAlsoShared(e.target.checked)}
-                      className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-accent)]"
-                    />
-                    Also show in Shared
-                  </label>
-                )}
-              </div>
-            )}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setDetailsOpen(true)}
-            className="cursor-pointer self-start text-[0.68rem] font-semibold text-[var(--color-ink-faint)] underline decoration-dotted underline-offset-2"
-          >
-            + add details
-          </button>
-        )}
-        {/* Real bug, found via direct report: there was no way to back out
-            of "add details" once opened — only a successful submit ever
-            closed it. This clears the extra fields on collapse (a genuine
-            cancel, not just hide-while-preserved) since "changed my mind"
-            reads as wanting a clean slate, not a peek. */}
-        {detailsOpen && (
-          <button
-            type="button"
-            onClick={() => {
-              setDetailsOpen(false);
-              setNotes("");
-              setDueDate("");
-              setAddScope(listScope);
-              setAddAlsoShared(false);
-            }}
-            className="cursor-pointer self-start text-[0.68rem] font-semibold text-[var(--color-ink-faint)] underline decoration-dotted underline-offset-2"
-          >
-            − hide details
-          </button>
-        )}
-      </div>
+          +
+        </span>
+      </button>
 
       <ul className="flex flex-col gap-1.5 md:min-h-0 md:flex-1 md:overflow-y-auto">
         {sortedTodos.map((todo) => {
@@ -705,5 +634,163 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
         </button>
       </div>
     </section>
+  );
+
+  return (
+    <>
+      {sectionContent}
+      {/* Portaled (not rendered inline) — TodoList is nested deep inside
+          App.tsx's <main className="tablet-grid relative z-[1]">, which
+          creates its own stacking context. A `position: fixed` descendant
+          of a stacking-context-creating ancestor is capped at that
+          ancestor's own stacking level no matter its own z-index — the
+          exact trap VoiceButton.tsx hit and documented earlier this
+          session. AddEventSheet doesn't need this itself only because it's
+          mounted as a top-level App.tsx sibling, outside <main> entirely —
+          not because portaling is unnecessary for a modal in general. */}
+      {addModalOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) closeAddModal();
+            }}
+            role="presentation"
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Add a to-do item"
+              className="max-h-[88vh] w-full max-w-full overflow-y-auto rounded-t-[20px] bg-[var(--color-surface)] p-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-2xl md:max-w-[380px] md:rounded-[var(--radius-panel)] md:p-6"
+            >
+              <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-[var(--color-line)] md:hidden" aria-hidden="true" />
+
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-base font-bold" style={{ fontFamily: "var(--font-display)" }}>
+                  Add to{" "}
+                  {listScope === "shared" ? "Shared" : listScope === eric?.id ? "Eric's" : "Lindsay's"} list
+                </p>
+                <button
+                  type="button"
+                  onClick={closeAddModal}
+                  aria-label="Close"
+                  className="grid h-[26px] w-[26px] flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-bg)] text-[var(--color-ink-soft)]"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  submit();
+                }}
+                className="mb-1.5 flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3"
+              >
+                <input
+                  ref={addInputRef}
+                  value={text}
+                  autoFocus
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Add an item…"
+                  aria-label="Add a to-do item"
+                  enterKeyHint="send"
+                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-ink-faint)]"
+                />
+                <button
+                  type="submit"
+                  aria-label={text.trim() ? "Send" : "Add item"}
+                  className="grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
+                >
+                  {text.trim() ? <SendIcon /> : "+"}
+                </button>
+              </form>
+
+              {addError && (
+                <p className="mb-1.5 rounded-lg bg-[var(--color-accent)]/10 px-2.5 py-1.5 text-[0.68rem] text-[var(--color-accent)]">
+                  {addError}
+                </p>
+              )}
+
+              {detailsOpen ? (
+                <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-[var(--color-line)] p-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">Notes (optional)</span>
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Notes…"
+                      rows={2}
+                      className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs leading-relaxed outline-none placeholder:text-[var(--color-ink-faint)]"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">Due date (optional)</span>
+                    <input
+                      type="date"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs outline-none"
+                    />
+                  </label>
+                  {(eric || lindsay) && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">List</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        <ListScopeChip person={null} active={addScope === "shared"} onClick={() => setAddScope("shared")} />
+                        {eric && (
+                          <ListScopeChip person={eric} active={addScope === eric.id} onClick={() => setAddScope(eric.id)} />
+                        )}
+                        {lindsay && (
+                          <ListScopeChip
+                            person={lindsay}
+                            active={addScope === lindsay.id}
+                            onClick={() => setAddScope(lindsay.id)}
+                          />
+                        )}
+                      </div>
+                      {addScope !== "shared" && (
+                        <label className="mt-0.5 flex items-center gap-1.5 text-[0.66rem] text-[var(--color-ink-soft)]">
+                          <input
+                            type="checkbox"
+                            checked={addAlsoShared}
+                            onChange={(e) => setAddAlsoShared(e.target.checked)}
+                            className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-accent)]"
+                          />
+                          Also show in Shared
+                        </label>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(true)}
+                  className="cursor-pointer self-start text-[0.68rem] font-semibold text-[var(--color-ink-faint)] underline decoration-dotted underline-offset-2"
+                >
+                  + add details
+                </button>
+              )}
+              {detailsOpen && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDetailsOpen(false);
+                    setNotes("");
+                    setDueDate("");
+                    setAddScope(listScope);
+                    setAddAlsoShared(false);
+                  }}
+                  className="cursor-pointer self-start text-[0.68rem] font-semibold text-[var(--color-ink-faint)] underline decoration-dotted underline-offset-2"
+                >
+                  − hide details
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }

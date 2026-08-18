@@ -96,9 +96,11 @@ test.describe("Todo due dates", () => {
 
   test("adding a todo without a due date still works (due date stays optional)", async ({ page }) => {
     const text = uniqueText("No due date item");
-    const input = page.getByLabel("Add a to-do item");
-    await input.fill(text);
-    await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+    await page.getByLabel("Add a to-do item").click();
+    const dialog = page.getByRole("dialog", { name: "Add a to-do item" });
+    await dialog.getByLabel("Add a to-do item").fill(text);
+    await dialog.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+    await page.keyboard.press("Escape");
     await expect(todoRow(page, text)).toBeVisible();
     const li = page.locator("li", { has: todoRow(page, text) });
     await expect(li.getByText(/^Due /)).toHaveCount(0);
