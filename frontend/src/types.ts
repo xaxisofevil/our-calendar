@@ -35,6 +35,13 @@ export interface TodoRecord {
   personId: number | null;
   alsoShared: boolean;
   position: number;
+  // Client-only, never sent by the server or to it — set while an
+  // optimistic create/update/delete for this row is still in flight (see
+  // lib/queries.ts's useCreateTodo/useUpdateTodo/useDeleteTodo). Exists so
+  // the UI can show a visibly-pending row instead of pretending an
+  // unconfirmed save is already final — a real, disclosed limitation is
+  // better than a silent lie if the save actually fails.
+  pending?: boolean;
 }
 
 export interface CreateEventInput {

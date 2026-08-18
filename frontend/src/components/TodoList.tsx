@@ -485,6 +485,26 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
             + add details
           </button>
         )}
+        {/* Real bug, found via direct report: there was no way to back out
+            of "add details" once opened — only a successful submit ever
+            closed it. This clears the extra fields on collapse (a genuine
+            cancel, not just hide-while-preserved) since "changed my mind"
+            reads as wanting a clean slate, not a peek. */}
+        {detailsOpen && (
+          <button
+            type="button"
+            onClick={() => {
+              setDetailsOpen(false);
+              setNotes("");
+              setDueDate("");
+              setAddScope(listScope);
+              setAddAlsoShared(false);
+            }}
+            className="cursor-pointer self-start text-[0.68rem] font-semibold text-[var(--color-ink-faint)] underline decoration-dotted underline-offset-2"
+          >
+            − hide details
+          </button>
+        )}
       </div>
 
       <ul className="flex flex-col gap-1.5 md:min-h-0 md:flex-1 md:overflow-y-auto">
@@ -520,40 +540,51 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
                   <>
                     <button
                       type="button"
+                      disabled={todo.pending}
                       onClick={() => {
                         setOpenSwipeId(null);
                         setEditingId(todo.id);
                       }}
                       aria-label={`Edit ${todo.text}`}
-                      className="flex-1 cursor-pointer rounded-md bg-[var(--color-line)] text-xs font-bold text-[var(--color-ink-soft)]"
+                      className="flex-1 cursor-pointer rounded-md bg-[var(--color-line)] text-xs font-bold text-[var(--color-ink-soft)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Edit
                     </button>
                     <button
                       type="button"
+                      disabled={todo.pending}
                       onClick={() => {
                         setOpenSwipeId(null);
                         onDelete(todo.id);
                       }}
                       aria-label={`Delete ${todo.text}`}
-                      className="flex-1 cursor-pointer rounded-md bg-[var(--color-accent)]/15 text-xs font-bold text-[var(--color-accent)]"
+                      className="flex-1 cursor-pointer rounded-md bg-[var(--color-accent)]/15 text-xs font-bold text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Delete
                     </button>
                   </>
                 }
               >
-                <div className="bg-[var(--color-surface)] py-0.5">
+                {/* Optimistic-update pending state (lib/queries.ts) — dimmed,
+                    not hidden or styled as if already confirmed. A save that
+                    actually fails rolls back visibly (the row just
+                    disappears/reverts) rather than silently pretending to
+                    have worked — the disclosed trade-off of true optimistic
+                    updates, not a lie. Edit/Delete are disabled above while
+                    pending since a temp id has nothing real yet to target. */}
+                <div className={cx("bg-[var(--color-surface)] py-0.5", todo.pending && "opacity-50")}>
                   <div className="flex items-center gap-2.5 text-sm">
                     <button
                       type="button"
                       role="checkbox"
                       aria-checked={todo.completed}
                       aria-label={todo.text}
+                      disabled={todo.pending}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => onToggle(todo.id, !todo.completed)}
                       className={cx(
-                        "grid h-[19px] w-[19px] flex-none cursor-pointer place-items-center rounded-md border-2 text-[var(--color-accent-ink)]",
+                        "grid h-[19px] w-[19px] flex-none place-items-center rounded-md border-2 text-[var(--color-accent-ink)]",
+                        todo.pending ? "cursor-not-allowed" : "cursor-pointer",
                         todo.completed
                           ? "border-[var(--color-good)] bg-[var(--color-good)]"
                           : "border-[var(--color-line)] bg-transparent",
