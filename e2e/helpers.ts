@@ -189,7 +189,14 @@ export async function addTodo(page: Page, text: string, notes?: string) {
     await page.getByRole("button", { name: "+ add details" }).click();
     await page.getByPlaceholder("Notes…").fill(notes);
   }
-  await page.getByRole("button", { name: "Add item", exact: true }).click();
+  // Direct request: the submit button's own accessible name now reflects
+  // whether there's text to send ("Add item" when empty, "Send" once
+  // there's something to submit — matches a messaging app's own send
+  // button, addressing a real "how do I actually submit this?" report).
+  // Both callers here always fill text first, so the button is already in
+  // its "Send" state by the time this runs — matched by either name so
+  // this helper doesn't care which label is currently showing.
+  await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
 }
 
 /** Same as addTodo, but also opens "+ add details" and fills the due-date
@@ -200,7 +207,14 @@ export async function addTodoWithDueDate(page: Page, text: string, dueDate: stri
   await input.fill(text);
   await page.getByRole("button", { name: "+ add details" }).click();
   await page.getByLabel("Due date (optional)").fill(dueDate);
-  await page.getByRole("button", { name: "Add item", exact: true }).click();
+  // Direct request: the submit button's own accessible name now reflects
+  // whether there's text to send ("Add item" when empty, "Send" once
+  // there's something to submit — matches a messaging app's own send
+  // button, addressing a real "how do I actually submit this?" report).
+  // Both callers here always fill text first, so the button is already in
+  // its "Send" state by the time this runs — matched by either name so
+  // this helper doesn't care which label is currently showing.
+  await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
 }
 
 /** "YYYY-MM-DD" for a given Date, in local time — matches the native

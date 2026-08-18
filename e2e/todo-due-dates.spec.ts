@@ -98,7 +98,7 @@ test.describe("Todo due dates", () => {
     const text = uniqueText("No due date item");
     const input = page.getByLabel("Add a to-do item");
     await input.fill(text);
-    await page.getByRole("button", { name: "Add item", exact: true }).click();
+    await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
     await expect(todoRow(page, text)).toBeVisible();
     const li = page.locator("li", { has: todoRow(page, text) });
     await expect(li.getByText(/^Due /)).toHaveCount(0);
