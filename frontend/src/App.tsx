@@ -269,14 +269,17 @@ function App() {
 
   const todoListSharedProps = {
     todos: todosQuery.data ?? [],
+    people: peopleQuery.data ?? [],
     addError: createTodo.error ? friendlyErrorMessage(createTodo.error) : null,
-    onAdd: (text: string, notes: string | null, dueDate: string | null) => {
-      createTodo.mutate({ text, notes, dueAt: dueDate });
+    onAdd: (text: string, notes: string | null, dueDate: string | null, personId: number | null, alsoShared: boolean) => {
+      createTodo.mutate({ text, notes, dueAt: dueDate, personId, alsoShared });
     },
     onToggle: (id: number, completed: boolean) => updateTodo.mutate({ id, input: { completed } }),
     onDelete: (id: number) => deleteTodo.mutate(id),
-    onEdit: (id: number, input: { text: string; notes: string | null; dueAt: string | null }) =>
-      updateTodo.mutate({ id, input }),
+    onEdit: (
+      id: number,
+      input: { text: string; notes: string | null; dueAt: string | null; personId: number | null; alsoShared: boolean },
+    ) => updateTodo.mutate({ id, input }),
   };
 
   const monthGridSharedProps = {

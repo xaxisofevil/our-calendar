@@ -69,6 +69,13 @@ export const createTodoSchema = z.object({
   notes: z.string().trim().max(2000).nullable().optional(),
   dueAt: dueAtField,
   list: z.string().trim().min(1).max(50).optional().default("household"),
+  // NULL/omitted = Shared (no single owner). See schema.ts's own comment on
+  // todos.personId/alsoShared for the full person-scoped-lists reasoning.
+  personId: z.number().int().positive().nullable().optional(),
+  // Only meaningful when personId is set — a personal item can additionally
+  // opt into showing in the Shared view. Ignored (stays false) for
+  // personId: null, since Shared already covers that case inherently.
+  alsoShared: z.boolean().optional(),
 });
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
 
@@ -79,6 +86,8 @@ export const updateTodoSchema = z.object({
   completed: z.boolean().optional(),
   position: z.number().int().optional(),
   list: z.string().trim().min(1).max(50).optional(),
+  personId: z.number().int().positive().nullable().optional(),
+  alsoShared: z.boolean().optional(),
 });
 export type UpdateTodoInput = z.infer<typeof updateTodoSchema>;
 

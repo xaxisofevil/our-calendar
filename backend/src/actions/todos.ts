@@ -19,6 +19,10 @@ export interface TodoDTO {
   dueAt: string | null;
   completed: boolean;
   list: string;
+  // See db/schema.ts's own comment on todos.personId/alsoShared. NULL =
+  // Shared; a set personId scopes to that person's own list.
+  personId: number | null;
+  alsoShared: boolean;
   position: number;
   // See ARCHITECTURE.md's batch-undo subsection / actions/batches.ts. NULL
   // for anything created the normal way (REST/MCP callers never set this).
@@ -33,6 +37,8 @@ function serializeTodo(row: TodoRow): TodoDTO {
     dueAt: row.dueAt,
     completed: Boolean(row.completed),
     list: row.list,
+    personId: row.personId ?? null,
+    alsoShared: Boolean(row.alsoShared),
     position: row.position,
     batchId: row.batchId ?? null,
   };
@@ -65,6 +71,12 @@ export function addTodo(input: unknown, batchId?: string | null): TodoDTO {
       notes: appendBatchTag(parsed.data.notes ?? null, batchId),
       dueAt: parsed.data.dueAt ?? null,
       list: parsed.data.list ?? "household",
+      personId: parsed.data.personId ?? null,
+      // alsoShared only means anything when personId is set — a Shared
+      // item (personId: null) is already shared by definition, so force it
+      // false rather than let a stray true value from the input sit there
+      // meaninglessly.
+      alsoShared: parsed.data.personId != null ? (parsed.data.alsoShared ?? false) : false,
       completed: false,
       position: nextPosition,
       batchId: batchId ?? null,
@@ -94,9 +106,19 @@ export function updateTodo(id: number, input: unknown): TodoDTO {
   const existing = db.select().from(todos).where(eq(todos.id, id)).get();
   if (!existing) throw new ActionNotFoundError("Todo not found");
 
+  // Same "alsoShared only means anything with a personId" normalization as
+  // addTodo, but against the *resulting* state (this update's personId if
+  // it's setting one, else whatever the row already had) — otherwise
+  // switching personId to null here without also explicitly clearing
+  // alsoShared in the same call would leave a meaningless true sitting on a
+  // now-Shared row.
+  const resultingPersonId = "personId" in parsed.data ? parsed.data.personId : existing.personId;
+  const patch = { ...parsed.data };
+  if (resultingPersonId == null) patch.alsoShared = false;
+
   const now = new Date().toISOString();
   db.update(todos)
-    .set({ ...parsed.data, updatedAt: now })
+    .set({ ...patch, updatedAt: now })
     .where(eq(todos.id, id))
     .run();
   const row = db.select().from(todos).where(eq(todos.id, id)).get();

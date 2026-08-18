@@ -131,6 +131,13 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_todos_batch_id ON todos(batch_id);
 `);
 
+// Person-scoped to-do lists (direct request) — see schema.ts's own comment
+// on todos.personId/alsoShared for the full reasoning. NULL personId =
+// Shared; a set personId scopes to that person, with alsoShared
+// independently controlling whether it also shows in Shared.
+ensureColumn("todos", "person_id", "person_id INTEGER REFERENCES people(id)");
+ensureColumn("todos", "also_shared", "also_shared INTEGER NOT NULL DEFAULT 0");
+
 // Real bug, found via direct report: a database created before
 // `sent_reminders`'s REFERENCES gained ON DELETE CASCADE (above) has that
 // constraint baked in as SQLite's default NO ACTION — meaning any event
