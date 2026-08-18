@@ -45,9 +45,11 @@ test.describe("Add-todo flow", () => {
     await todoRow(page, "Milk").waitFor();
     const before = await list.getByRole("checkbox").count();
 
-    const input = page.getByLabel("Add a to-do item");
-    await input.fill("   ");
-    await page.getByRole("button", { name: "Add item", exact: true }).click();
+    await page.getByLabel("Add a to-do item").click();
+    const dialog = page.getByRole("dialog", { name: "Add a to-do item" });
+    await dialog.getByLabel("Add a to-do item").fill("   ");
+    await dialog.getByRole("button", { name: "Add item", exact: true }).click();
+    await page.keyboard.press("Escape");
 
     const after = await list.getByRole("checkbox").count();
     expect(after).toBe(before);
@@ -80,18 +82,30 @@ test.describe("Add-todo flow", () => {
 
   test("Enter key submits the same as clicking Add", async ({ page }) => {
     const text = uniqueText("Enter-key item");
-    const input = page.getByLabel("Add a to-do item");
+    await page.getByLabel("Add a to-do item").click();
+    const dialog = page.getByRole("dialog", { name: "Add a to-do item" });
+    const input = dialog.getByLabel("Add a to-do item");
     await input.fill(text);
+    // Real <form onSubmit> now (see TodoList.tsx's own comment) — a native
+    // Enter keypress on an <input> inside a <form> triggers submission at
+    // the browser level, independent of any onKeyDown/e.key detection.
     await input.press("Enter");
+    await page.keyboard.press("Escape");
     await expect(todoRow(page, text)).toBeVisible();
   });
 
   test.describe("adversarial: overlong text", () => {
     test("text over the backend's 500-char limit does not silently vanish", async ({ page }) => {
       const longText = "Y".repeat(600);
-      const input = page.getByLabel("Add a to-do item");
-      await input.fill(longText);
-      await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+      await page.getByLabel("Add a to-do item").click();
+      const dialog = page.getByRole("dialog", { name: "Add a to-do item" });
+      // Modal deliberately left open here (not closed via Escape like the
+      // other tests) — the error message this test checks for only renders
+      // inside the modal (see TodoList.tsx), and the real UI leaves the
+      // modal open after a submit attempt anyway (see its own "stays open"
+      // comment), so this matches what a real user would actually see.
+      await dialog.getByLabel("Add a to-do item").fill(longText);
+      await dialog.getByRole("button", { name: /^(Add item|Send)$/ }).click();
 
       // KNOWN BUG (see QA report): TodoList.submit() clears the input and
       // App.tsx's onAdd fires createTodo.mutate() with no onError/onSuccess

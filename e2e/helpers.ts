@@ -182,39 +182,48 @@ export async function saveEventForm(page: Page) {
   await page.getByRole("dialog", { name: "New event" }).getByRole("button", { name: "Save" }).click();
 }
 
+// Direct request: the persistent inline input became a "+"-triggered modal
+// (matching AddEventSheet's own pattern) — the trigger button and the real
+// input inside the modal deliberately share the accessible name "Add a
+// to-do item" (both really are "the way to add a to-do," from a screen
+// reader's perspective), so every helper here scopes to the open dialog
+// once it's open rather than relying on the label alone, which would be
+// ambiguous the moment the modal is up. The modal is left open by design
+// after a successful add (matches a messaging app's own send behavior —
+// clear + refocus, not close, so several items can go in back-to-back);
+// these helpers explicitly close it before returning so callers can
+// interact with the list immediately afterward without the backdrop in
+// the way.
+async function openAddTodoModal(page: Page) {
+  await page.getByLabel("Add a to-do item").click();
+  return page.getByRole("dialog", { name: "Add a to-do item" });
+}
+
 export async function addTodo(page: Page, text: string, notes?: string) {
-  const input = page.getByLabel("Add a to-do item");
-  await input.fill(text);
+  const dialog = await openAddTodoModal(page);
+  await dialog.getByLabel("Add a to-do item").fill(text);
   if (notes) {
-    await page.getByRole("button", { name: "+ add details" }).click();
-    await page.getByPlaceholder("Notes…").fill(notes);
+    await dialog.getByRole("button", { name: "+ add details" }).click();
+    await dialog.getByPlaceholder("Notes…").fill(notes);
   }
-  // Direct request: the submit button's own accessible name now reflects
-  // whether there's text to send ("Add item" when empty, "Send" once
-  // there's something to submit — matches a messaging app's own send
-  // button, addressing a real "how do I actually submit this?" report).
-  // Both callers here always fill text first, so the button is already in
-  // its "Send" state by the time this runs — matched by either name so
-  // this helper doesn't care which label is currently showing.
-  await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+  // The submit button's own accessible name reflects whether there's text
+  // to send ("Add item" when empty, "Send" once there's something to
+  // submit — matches a messaging app's own send button). Both callers here
+  // always fill text first, so it's already in its "Send" state.
+  await dialog.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+  await page.keyboard.press("Escape");
 }
 
 /** Same as addTodo, but also opens "+ add details" and fills the due-date
  * date input — dueDate is a "YYYY-MM-DD" string (native <input type="date">
  * format), e.g. from toDateInputValue() below. */
 export async function addTodoWithDueDate(page: Page, text: string, dueDate: string) {
-  const input = page.getByLabel("Add a to-do item");
-  await input.fill(text);
-  await page.getByRole("button", { name: "+ add details" }).click();
-  await page.getByLabel("Due date (optional)").fill(dueDate);
-  // Direct request: the submit button's own accessible name now reflects
-  // whether there's text to send ("Add item" when empty, "Send" once
-  // there's something to submit — matches a messaging app's own send
-  // button, addressing a real "how do I actually submit this?" report).
-  // Both callers here always fill text first, so the button is already in
-  // its "Send" state by the time this runs — matched by either name so
-  // this helper doesn't care which label is currently showing.
-  await page.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+  const dialog = await openAddTodoModal(page);
+  await dialog.getByLabel("Add a to-do item").fill(text);
+  await dialog.getByRole("button", { name: "+ add details" }).click();
+  await dialog.getByLabel("Due date (optional)").fill(dueDate);
+  await dialog.getByRole("button", { name: /^(Add item|Send)$/ }).click();
+  await page.keyboard.press("Escape");
 }
 
 /** "YYYY-MM-DD" for a given Date, in local time — matches the native
