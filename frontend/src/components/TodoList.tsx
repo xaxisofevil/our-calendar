@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import type { TodoRecord } from "../types";
+import type { PersonRecord, TodoRecord } from "../types";
 import { cx } from "../lib/cx";
 import { PanelExpandButton } from "./PanelExpandButton";
 import { SwipeRevealRow } from "./SwipeRevealRow";
@@ -9,14 +9,22 @@ export interface TodoEditInput {
   text: string;
   notes: string | null;
   dueAt: string | null;
+  personId: number | null;
+  alsoShared: boolean;
 }
 
 interface TodoListProps {
   todos: TodoRecord[];
+  /** Direct request: person-scoped lists. Only Eric/Lindsay ever get their
+   * own list/chip — deliberately not "whoever's in the household," so this
+   * is found by label out of the full people list, not assumed to be
+   * exactly people[0]/people[1]. Missing gracefully (e.g. before seed data
+   * exists) just means that chip/picker option doesn't render. */
+  people: PersonRecord[];
   /** Message from the create-todo mutation, if it failed server-side (e.g.
    * text over the 500-char limit) — see ARCHITECTURE.md M2 bug report #3. */
   addError?: string | null;
-  onAdd: (text: string, notes: string | null, dueDate: string | null) => void;
+  onAdd: (text: string, notes: string | null, dueDate: string | null, personId: number | null, alsoShared: boolean) => void;
   onToggle: (id: number, completed: boolean) => void;
   onDelete: (id: number) => void;
   /** New (this pass): the first "edit an existing todo" flow — a
@@ -26,6 +34,49 @@ interface TodoListProps {
   // Tablet card header (this pass) — To-Do's own expand button.
   expanded?: boolean;
   onToggleExpand?: () => void;
+}
+
+/** "Shared" | a specific person's id — used both for the top filter tabs
+ * (which list is currently displayed) and the create/edit person-picker
+ * (which list a specific item belongs to). Same three-way shape, two
+ * different jobs — kept as one type since every consumer needs exactly
+ * this choice. */
+type ListScope = "shared" | number;
+
+/** Shared visual chip — colored dot + label, filled with the person's own
+ * color when active (mirrors AddEventSheet's existing "For" picker exactly,
+ * so this reads as the same established pattern, not a new one). `null`
+ * person means the "Shared" option — no color of its own, uses the app's
+ * accent color instead. */
+function ListScopeChip({
+  person,
+  active,
+  onClick,
+}: {
+  person: PersonRecord | null;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const color = person?.color ?? "var(--color-accent)";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cx(
+        "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-bold transition-colors",
+        active ? "border-transparent text-white" : "border-[var(--color-line)] text-[var(--color-ink-soft)]",
+      )}
+      style={active ? { backgroundColor: color } : undefined}
+    >
+      <span
+        className="h-2 w-2 flex-none rounded-full"
+        style={{ backgroundColor: active ? "rgba(255,255,255,0.85)" : color }}
+        aria-hidden="true"
+      />
+      {person?.label ?? "Shared"}
+    </button>
+  );
 }
 
 const HIDE_COMPLETED_KEY = "our-calendar:hide-completed-todos";
@@ -90,21 +141,33 @@ function isOverdue(dueDate: string): boolean {
  * optional-details fields, deliberately not a heavier modal system. */
 function TodoEditForm({
   todo,
+  eric,
+  lindsay,
   onSave,
   onCancel,
 }: {
   todo: TodoRecord;
+  eric: PersonRecord | null;
+  lindsay: PersonRecord | null;
   onSave: (input: TodoEditInput) => void;
   onCancel: () => void;
 }) {
   const [text, setText] = useState(todo.text);
   const [notes, setNotes] = useState(todo.notes ?? "");
   const [dueDate, setDueDate] = useState(todo.dueAt ?? "");
+  const [scope, setScope] = useState<ListScope>(todo.personId ?? "shared");
+  const [alsoShared, setAlsoShared] = useState(todo.alsoShared);
 
   function save() {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onSave({ text: trimmed, notes: notes.trim() ? notes.trim() : null, dueAt: dueDate || null });
+    onSave({
+      text: trimmed,
+      notes: notes.trim() ? notes.trim() : null,
+      dueAt: dueDate || null,
+      personId: scope === "shared" ? null : scope,
+      alsoShared: scope === "shared" ? false : alsoShared,
+    });
   }
 
   return (
@@ -146,6 +209,29 @@ function TodoEditForm({
           className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs outline-none"
         />
       </label>
+      {(eric || lindsay) && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">List</span>
+          <div className="flex flex-wrap gap-1.5">
+            <ListScopeChip person={null} active={scope === "shared"} onClick={() => setScope("shared")} />
+            {eric && <ListScopeChip person={eric} active={scope === eric.id} onClick={() => setScope(eric.id)} />}
+            {lindsay && (
+              <ListScopeChip person={lindsay} active={scope === lindsay.id} onClick={() => setScope(lindsay.id)} />
+            )}
+          </div>
+          {scope !== "shared" && (
+            <label className="mt-0.5 flex items-center gap-1.5 text-[0.66rem] text-[var(--color-ink-soft)]">
+              <input
+                type="checkbox"
+                checked={alsoShared}
+                onChange={(e) => setAlsoShared(e.target.checked)}
+                className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-accent)]"
+              />
+              Also show in Shared
+            </label>
+          )}
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <button
           type="button"
@@ -168,7 +254,10 @@ function TodoEditForm({
   );
 }
 
-export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, expanded, onToggleExpand }: TodoListProps) {
+export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, onEdit, expanded, onToggleExpand }: TodoListProps) {
+  const eric = people.find((p) => p.label === "Eric") ?? null;
+  const lindsay = people.find((p) => p.label === "Lindsay") ?? null;
+
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -177,6 +266,22 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, e
   const [hideCompleted, setHideCompleted] = useState(readHideCompleted);
   const [openSwipeId, setOpenSwipeId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Direct request: person-scoped lists. Which list is currently displayed
+  // (top chips) — also doubles as the default scope for a newly-added item,
+  // so adding while viewing Eric's list defaults new items there rather
+  // than always defaulting to Shared.
+  const [listScope, setListScope] = useState<ListScope>("shared");
+  const [addScope, setAddScope] = useState<ListScope>("shared");
+  const [addAlsoShared, setAddAlsoShared] = useState(false);
+
+  // Keep the quick-add picker's default following whichever tab is
+  // currently open — switching to Eric's list should mean "add" defaults
+  // there too, not silently stay on whatever was picked before. Still
+  // freely overridable per-item in the picker itself.
+  useEffect(() => {
+    setAddScope(listScope);
+    setAddAlsoShared(false);
+  }, [listScope]);
 
   // Item 4/5: tapping outside the currently-open swipe reveal (another row,
   // or anywhere else in/outside the list) closes it — same pattern as
@@ -205,7 +310,13 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, e
   function submit() {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onAdd(trimmed, notes.trim() ? notes.trim() : null, dueDate || null);
+    onAdd(
+      trimmed,
+      notes.trim() ? notes.trim() : null,
+      dueDate || null,
+      addScope === "shared" ? null : addScope,
+      addScope === "shared" ? false : addAlsoShared,
+    );
     setText("");
     setNotes("");
     setDueDate("");
@@ -221,8 +332,14 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, e
     });
   }
 
-  const visibleTodos = hideCompleted ? todos.filter((t) => !t.completed) : todos;
-  const hiddenCount = todos.length - visibleTodos.length;
+  // Shared shows everything with no owner, plus any personal item that
+  // opted in via alsoShared; a person's tab shows only what's actually
+  // theirs — alsoShared doesn't leak an item onto a *different* person's
+  // tab, only onto Shared.
+  const scopedTodos =
+    listScope === "shared" ? todos.filter((t) => t.personId == null || t.alsoShared) : todos.filter((t) => t.personId === listScope);
+  const visibleTodos = hideCompleted ? scopedTodos.filter((t) => !t.completed) : scopedTodos;
+  const hiddenCount = scopedTodos.length - visibleTodos.length;
 
   // ARCHITECTURE.md §8: incomplete overdue items float to the top,
   // most-overdue-first — purely a display sort, nothing auto-mutates.
@@ -246,12 +363,35 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, e
           <p className="font-bold" style={{ fontFamily: "var(--font-display)", fontSize: "var(--card-title-size)" }}>
             To-Do
           </p>
-          <p className="text-[0.66rem] text-[var(--color-ink-faint)]">Shared list — not tied to any date</p>
+          <p className="text-[0.66rem] text-[var(--color-ink-faint)]">
+            {listScope === "shared"
+              ? "Shared list"
+              : listScope === eric?.id
+                ? "Eric's list"
+                : listScope === lindsay?.id
+                  ? "Lindsay's list"
+                  : "List"}{" "}
+            — not tied to any date
+          </p>
         </div>
         {onToggleExpand && (
           <PanelExpandButton expanded={expanded ?? false} onClick={onToggleExpand} label="To-Do" className="hidden md:grid" />
         )}
       </div>
+
+      {/* Direct request: Shared/Eric/Lindsay tabs — which list this card is
+          currently showing. Only rendered once Eric/Lindsay actually exist
+          in the people list; a plain Shared-only household (or before seed
+          data exists) sees no tabs at all rather than two dead/empty ones. */}
+      {(eric || lindsay) && (
+        <div className="mb-2.5 flex flex-none flex-wrap gap-1.5">
+          <ListScopeChip person={null} active={listScope === "shared"} onClick={() => setListScope("shared")} />
+          {eric && <ListScopeChip person={eric} active={listScope === eric.id} onClick={() => setListScope(eric.id)} />}
+          {lindsay && (
+            <ListScopeChip person={lindsay} active={listScope === lindsay.id} onClick={() => setListScope(lindsay.id)} />
+          )}
+        </div>
+      )}
 
       <div className="mb-3 flex flex-none flex-col gap-1.5">
         <div className="flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3">
@@ -306,6 +446,35 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, e
                 className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs outline-none"
               />
             </label>
+            {(eric || lindsay) && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[0.6rem] font-semibold text-[var(--color-ink-faint)]">List</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <ListScopeChip person={null} active={addScope === "shared"} onClick={() => setAddScope("shared")} />
+                  {eric && (
+                    <ListScopeChip person={eric} active={addScope === eric.id} onClick={() => setAddScope(eric.id)} />
+                  )}
+                  {lindsay && (
+                    <ListScopeChip
+                      person={lindsay}
+                      active={addScope === lindsay.id}
+                      onClick={() => setAddScope(lindsay.id)}
+                    />
+                  )}
+                </div>
+                {addScope !== "shared" && (
+                  <label className="mt-0.5 flex items-center gap-1.5 text-[0.66rem] text-[var(--color-ink-soft)]">
+                    <input
+                      type="checkbox"
+                      checked={addAlsoShared}
+                      onChange={(e) => setAddAlsoShared(e.target.checked)}
+                      className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-accent)]"
+                    />
+                    Also show in Shared
+                  </label>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <button
@@ -328,6 +497,8 @@ export function TodoList({ todos, addError, onAdd, onToggle, onDelete, onEdit, e
               <li key={todo.id}>
                 <TodoEditForm
                   todo={todo}
+                  eric={eric}
+                  lindsay={lindsay}
                   onCancel={() => setEditingId(null)}
                   onSave={(input) => {
                     onEdit(todo.id, input);

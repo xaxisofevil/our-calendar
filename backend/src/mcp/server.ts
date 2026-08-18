@@ -175,7 +175,8 @@ server.registerTool(
   "list_todos",
   {
     title: "List todos",
-    description: "List all items on the shared household to-do list, in their display order.",
+    description:
+      "List every to-do item, in display order — both Shared and each household member's personal list. personId is null for Shared items, a person's id for their personal list; alsoShared marks a personal item that also appears in Shared.",
     inputSchema: noArgsSchema,
   },
   async () => runAction(() => listTodos()),
@@ -185,7 +186,8 @@ server.registerTool(
   "add_todo",
   {
     title: "Add todo",
-    description: "Add a new item to the shared household to-do list.",
+    description:
+      "Add a new to-do item. Omit personId (or set it null) for the Shared list; set it to a household member's id (see list_people) to put it on their personal list instead — set alsoShared: true too if it should also show in Shared.",
     inputSchema: createTodoSchema,
   },
   async (args) => runCreate(() => addTodo(args, voiceCommandBatchId)),

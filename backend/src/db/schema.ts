@@ -13,7 +13,20 @@ export const todos = sqliteTable("todos", {
   // attribute on the flat dateless list, not a second calendar.
   dueAt: text("due_at"),
   completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+  // `list` (below) is now dead weight, kept rather than migrated away
+  // (matches this project's general additive-only schema-change habit —
+  // see the batch_id columns' own comment) — direct request replaced its
+  // original "Shopping vs Chores" category-splitting purpose with
+  // person-scoped lists instead, before the category idea was ever built.
+  // `personId`/`alsoShared` below are the real mechanism now: NULL personId
+  // = Shared (visible to everyone, no single owner); a set personId scopes
+  // the item to that person's own list, with `alsoShared` independently
+  // controlling whether it *also* appears in the Shared view — a todo can
+  // be personal-only, shared-only, or both, which a single-value `list`
+  // column can't express at all.
   list: text("list").notNull().default("household"),
+  personId: integer("person_id"),
+  alsoShared: integer("also_shared", { mode: "boolean" }).notNull().default(false),
   position: integer("position").notNull(),
   // Nullable batch-tag id (backend/src/actions/batches.ts, generalized out
   // of the calendar-add skill — see ARCHITECTURE.md §10a-1's "generalizing"

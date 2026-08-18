@@ -29,6 +29,11 @@ export interface TodoRecord {
   dueAt: string | null; // ISO 8601 date (YYYY-MM-DD), optional — §8/§11
   completed: boolean;
   list: string;
+  // Direct request: person-scoped to-do lists. NULL = Shared (no single
+  // owner); a set personId scopes to that person's own list, with
+  // alsoShared independently controlling whether it also shows in Shared.
+  personId: number | null;
+  alsoShared: boolean;
   position: number;
 }
 
@@ -59,6 +64,8 @@ export interface CreateTodoInput {
   notes?: string | null;
   dueAt?: string | null;
   list?: string;
+  personId?: number | null;
+  alsoShared?: boolean;
 }
 
 export interface UpdateTodoInput {
@@ -68,6 +75,8 @@ export interface UpdateTodoInput {
   completed?: boolean;
   position?: number;
   list?: string;
+  personId?: number | null;
+  alsoShared?: boolean;
 }
 
 // ARCHITECTURE.md §8a/§12 — mirrors backend/src/actions/push.ts's
