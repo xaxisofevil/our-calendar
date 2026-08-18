@@ -129,7 +129,7 @@ function SendIcon() {
   return (
     <svg viewBox="0 0 20 20" className="h-3 w-3" aria-hidden="true">
       <path
-        d="M10 15.5V4.5M10 4.5 5 9.5M10 4.5l5 5"
+        d="M4.5 10h11M9.5 5l5 5-5 5"
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
@@ -419,29 +419,47 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
       )}
 
       <div className="mb-3 flex flex-none flex-col gap-1.5">
-        <div className="flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3">
+        {/* Real bug, found via direct report with screenshots: onKeyDown's
+            `e.key === "Enter"` check — the only thing wiring the mobile
+            keyboard's action key to submit() — doesn't reliably fire on
+            Android software keyboards (Gboard, Samsung Keyboard, ...): IME
+            composition means the key the *keyboard itself* visibly shows
+            can change (as seen in the report) without a clean, detectable
+            "Enter" keydown ever reaching this code. A real <form onSubmit>
+            sidesteps that entirely — every mobile keyboard's action key
+            reliably fires a form's native submit event at the browser
+            level, independent of however that OS/keyboard combination
+            chooses to represent "Enter" as a raw key event. The button is
+            now type="submit" (not a manual onClick) so tap and
+            keyboard-action-key both go through the exact same path, one
+            source of truth instead of two that can drift apart. */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+          className="flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3"
+        >
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
             placeholder="Add an item…"
             aria-label="Add a to-do item"
+            // Tells the OS keyboard what its own action key should look
+            // like/mean, rather than leaving it to guess (which is why it
+            // was showing a generic "next" icon) — "send" reliably gets a
+            // proper send-style key on both Android and iOS.
+            enterKeyHint="send"
             className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-ink-faint)]"
           />
           <button
-            type="button"
-            onClick={submit}
+            type="submit"
             aria-label={text.trim() ? "Send" : "Add item"}
             className="grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
           >
             {text.trim() ? <SendIcon /> : "+"}
           </button>
-        </div>
+        </form>
 
         {addError && (
           <p className="rounded-lg bg-[var(--color-accent)]/10 px-2.5 py-1.5 text-[0.68rem] text-[var(--color-accent)]">
