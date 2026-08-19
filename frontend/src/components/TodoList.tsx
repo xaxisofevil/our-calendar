@@ -212,7 +212,13 @@ function TodoEditForm({
             if (e.key === "Escape") onCancel();
           }}
           aria-label={`Edit text for ${todo.text}`}
-          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          // text-base (16px), not text-sm — real bug class, direct request:
+          // iOS Safari auto-zooms the whole page when focusing a form
+          // element with font-size under 16px (it assumes small text means
+          // hard to type into), and the zoom doesn't reset cleanly
+          // afterward. 16px is the documented safe floor; every real
+          // <input>/<textarea> in this file uses it now, not just this one.
+          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-base outline-none focus:border-[var(--color-accent)]"
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -222,7 +228,7 @@ function TodoEditForm({
           onChange={(e) => setNotes(e.target.value)}
           rows={2}
           aria-label={`Edit notes for ${todo.text}`}
-          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs leading-relaxed outline-none"
+          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-base leading-relaxed outline-none"
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -232,7 +238,7 @@ function TodoEditForm({
           value={dueDate}
           onChange={(e) => setDueDate(e.target.value)}
           aria-label={`Edit due date for ${todo.text}`}
-          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs outline-none"
+          className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-base outline-none"
         />
       </label>
       {(eric || lindsay) && (
@@ -323,6 +329,17 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
   // without reopening each time.
   const [addModalOpen, setAddModalOpen] = useState(false);
   const addInputRef = useRef<HTMLInputElement>(null);
+  // Direct request: the modal is a fixed-position bottom sheet, and the
+  // page behind it is deliberately still scrollable (kept, on request) —
+  // but a `position: fixed` element always covers the *same* screen region
+  // regardless of scroll position, so as the list grows while adding
+  // several items in a row, new rows landing in that region become
+  // permanently unreachable by scrolling: no scroll position ever brings
+  // them out from behind the sheet. scroll-margin-bottom (below, on the
+  // <ul> itself) tells the browser's own scrollIntoView to always leave
+  // room for the sheet; this ref is what triggers that scroll after each
+  // successful add, in submit() below.
+  const listRef = useRef<HTMLUListElement>(null);
 
   const closeAddModal = useCallback(() => {
     setAddModalOpen(false);
@@ -385,7 +402,13 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
     // next item rather than closing. Deferred a tick so it runs after
     // React's own re-render (an immediate synchronous focus() call here can
     // race the DOM update and silently no-op on some mobile browsers).
-    setTimeout(() => addInputRef.current?.focus(), 0);
+    // Same tick also scrolls the newest item out from behind the fixed
+    // modal sheet — see listRef's own comment for why this is needed at
+    // all, given background scroll is deliberately still allowed.
+    setTimeout(() => {
+      addInputRef.current?.focus();
+      listRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 0);
   }
 
   function toggleExpanded(id: number) {
@@ -467,18 +490,37 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
         type="button"
         onClick={() => setAddModalOpen(true)}
         aria-label="Add a to-do item"
-        className="mb-3 flex flex-none cursor-pointer items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3 text-left"
+        className="mb-3 flex flex-none cursor-pointer items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1 pl-3 text-left"
       >
         <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-ink-faint)]">Add an item…</span>
+        {/* 44px, not the original 22px — direct request, matches the
+            ~44px minimum tap-target guideline (Apple HIG/Android's own
+            48dp) other primary controls in this app already use (e.g.
+            VoiceButton's 64px mic button). This one's purely decorative
+            (the whole pill is one tap target already), but kept in visual
+            sync with the modal's own real Send button below, which does
+            need the size for real. */}
         <span
           aria-hidden="true"
-          className="grid h-[22px] w-[22px] flex-none place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
+          className="grid h-11 w-11 flex-none place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
         >
           +
         </span>
       </button>
 
-      <ul className="flex flex-col gap-1.5 md:min-h-0 md:flex-1 md:overflow-y-auto">
+      <ul
+        ref={listRef}
+        // scroll-margin-bottom reserves room for the modal's own typical
+        // height when it's open — otherwise scrollIntoView (submit()
+        // above) would happily scroll a new item to the very bottom edge
+        // of the *viewport*, which is still behind the fixed sheet.
+        // 50vh is a deliberately generous estimate (the sheet is usually
+        // shorter), not a measurement of the sheet's real height — safe to
+        // over-reserve here, since the only cost is scrolling slightly
+        // further than strictly necessary.
+        style={{ scrollMarginBottom: "50vh" }}
+        className="flex flex-col gap-1.5 md:min-h-0 md:flex-1 md:overflow-y-auto"
+      >
         {sortedTodos.map((todo) => {
           const dueDateValue = todo.dueAt;
           const overdue = dueDateValue ? !todo.completed && isOverdue(dueDateValue) : false;
@@ -701,7 +743,7 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
                   e.preventDefault();
                   submit();
                 }}
-                className="mb-1.5 flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1.5 pl-3"
+                className="mb-1.5 flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] py-1 pr-1 pl-3"
               >
                 <input
                   ref={addInputRef}
@@ -711,7 +753,12 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
                   placeholder="Add an item…"
                   aria-label="Add a to-do item"
                   enterKeyHint="send"
-                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-ink-faint)]"
+                  // text-base (16px), not text-sm — real bug, direct
+                  // request: iOS Safari auto-zooms the whole page on focus
+                  // when a form element's font-size is under 16px. This is
+                  // the field people actually type into most, so it's the
+                  // one most likely to have been triggering it.
+                  className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-ink-faint)]"
                 />
                 <button
                   type="submit"
@@ -736,7 +783,13 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
                   // loses focus for a keyboard-driven Enter or a tap here.
                   onPointerDown={(e) => e.preventDefault()}
                   onMouseDown={(e) => e.preventDefault()}
-                  className="grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
+                  // 44px, not the original 22px — direct request, matches
+                  // the ~44px minimum tap-target guideline (Apple HIG/
+                  // Android's own 48dp). Unlike the trigger's decorative
+                  // circle, this one is a real, standalone tap target —
+                  // the Enter key works too, but for anyone tapping
+                  // instead, 22px was genuinely small to hit reliably.
+                  className="grid h-11 w-11 flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
                 >
                   {text.trim() ? <SendIcon /> : "+"}
                 </button>
@@ -757,7 +810,7 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="Notes…"
                       rows={2}
-                      className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs leading-relaxed outline-none placeholder:text-[var(--color-ink-faint)]"
+                      className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-base leading-relaxed outline-none placeholder:text-[var(--color-ink-faint)]"
                     />
                   </label>
                   <label className="flex flex-col gap-1">
@@ -766,7 +819,7 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
                       type="date"
                       value={dueDate}
                       onChange={(e) => setDueDate(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs outline-none"
+                      className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2.5 py-1.5 text-base outline-none"
                     />
                   </label>
                   {(eric || lindsay) && (
