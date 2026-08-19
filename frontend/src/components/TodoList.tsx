@@ -423,40 +423,39 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
       aria-label="Household to-do list"
       className="rounded-[var(--radius-panel)] bg-[var(--color-surface)] p-3.5 shadow-[0_1px_0_rgba(40,25,10,0.05),0_12px_26px_-18px_rgba(50,32,12,0.55)] md:flex md:h-full md:flex-col"
     >
+      {/* Direct request: the subtitle ("Shared list — not tied to any
+          date") is gone, and the Shared/Eric/Lindsay tabs moved up onto
+          this same row as the title — on mobile there was nothing else in
+          this row (the expand button is tablet-only), leaving a whole
+          empty half-width strip to the title's right for no reason. */}
       <div className="mb-2.5 flex flex-none items-start justify-between gap-2">
-        <div>
-          <p className="font-bold" style={{ fontFamily: "var(--font-display)", fontSize: "var(--card-title-size)" }}>
-            To-Do
-          </p>
-          <p className="text-[0.66rem] text-[var(--color-ink-faint)]">
-            {listScope === "shared"
-              ? "Shared list"
-              : listScope === eric?.id
-                ? "Eric's list"
-                : listScope === lindsay?.id
-                  ? "Lindsay's list"
-                  : "List"}{" "}
-            — not tied to any date
-          </p>
-        </div>
-        {onToggleExpand && (
-          <PanelExpandButton expanded={expanded ?? false} onClick={onToggleExpand} label="To-Do" className="hidden md:grid" />
-        )}
-      </div>
-
-      {/* Direct request: Shared/Eric/Lindsay tabs — which list this card is
-          currently showing. Only rendered once Eric/Lindsay actually exist
-          in the people list; a plain Shared-only household (or before seed
-          data exists) sees no tabs at all rather than two dead/empty ones. */}
-      {(eric || lindsay) && (
-        <div className="mb-2.5 flex flex-none flex-wrap gap-1.5">
-          <ListScopeChip person={null} active={listScope === "shared"} onClick={() => setListScope("shared")} />
-          {eric && <ListScopeChip person={eric} active={listScope === eric.id} onClick={() => setListScope(eric.id)} />}
-          {lindsay && (
-            <ListScopeChip person={lindsay} active={listScope === lindsay.id} onClick={() => setListScope(lindsay.id)} />
+        <p className="flex-none font-bold" style={{ fontFamily: "var(--font-display)", fontSize: "var(--card-title-size)" }}>
+          To-Do
+        </p>
+        <div className="flex items-center gap-1.5">
+          {/* Only rendered once Eric/Lindsay actually exist in the people
+              list; a plain Shared-only household (or before seed data
+              exists) sees no tabs at all rather than two dead/empty ones. */}
+          {(eric || lindsay) && (
+            <div className="flex flex-wrap justify-end gap-1.5">
+              <ListScopeChip person={null} active={listScope === "shared"} onClick={() => setListScope("shared")} />
+              {eric && (
+                <ListScopeChip person={eric} active={listScope === eric.id} onClick={() => setListScope(eric.id)} />
+              )}
+              {lindsay && (
+                <ListScopeChip
+                  person={lindsay}
+                  active={listScope === lindsay.id}
+                  onClick={() => setListScope(lindsay.id)}
+                />
+              )}
+            </div>
+          )}
+          {onToggleExpand && (
+            <PanelExpandButton expanded={expanded ?? false} onClick={onToggleExpand} label="To-Do" className="hidden md:grid" />
           )}
         </div>
-      )}
+      </div>
 
       {/* Direct request: this used to be a real, always-visible <input> —
           now it's a button styled to look exactly like one, so tapping it
@@ -661,7 +660,24 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
               role="dialog"
               aria-modal="true"
               aria-label="Add a to-do item"
-              className="max-h-[88vh] w-full max-w-full overflow-y-auto rounded-t-[20px] bg-[var(--color-surface)] p-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-2xl md:max-w-[380px] md:rounded-[var(--radius-panel)] md:p-6"
+              // Real bug, found via direct report with a screenshot: text
+              // rendered black/invisible throughout this modal. Root cause —
+              // `text-[var(--color-ink)]` (the default text color) is set on
+              // App.tsx's own root <div>, not at :root/<html> — every other
+              // element in the app inherits it by being a normal DOM
+              // descendant of that div, but this modal is portaled directly
+              // to document.body (a *sibling* of that div, not a descendant
+              // — see the portal's own comment below), so it never inherited
+              // that color at all and fell back to the browser default
+              // (black), invisible against this dark surface. Explicit here
+              // once, at the dialog's own root, so it correctly cascades to
+              // everything inside via normal CSS inheritance — same fix
+              // VoiceButton.tsx/HaDashboardButton.tsx already needed and
+              // applied element-by-element; this is the one place it was
+              // missed because this JSX was carried over from the original
+              // non-portaled inline version, where the app root's own
+              // inheritance already covered it.
+              className="max-h-[88vh] w-full max-w-full overflow-y-auto rounded-t-[20px] bg-[var(--color-surface)] p-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-[var(--color-ink)] shadow-2xl md:max-w-[380px] md:rounded-[var(--radius-panel)] md:p-6"
             >
               <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-[var(--color-line)] md:hidden" aria-hidden="true" />
 

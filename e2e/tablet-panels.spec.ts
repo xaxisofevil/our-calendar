@@ -74,7 +74,7 @@ test.describe("Swipe-to-reveal: to-do rows", () => {
     await expect(page.getByRole("button", { name: `Delete ${text}` })).toBeVisible();
 
     // Tap the to-do list's own heading — well outside any row.
-    await page.getByText("Shared list — not tied to any date").click();
+    await page.locator('section[aria-label="Household to-do list"]').getByText("To-Do", { exact: true }).click();
     await expect(page.getByRole("button", { name: `Delete ${text}` })).toHaveCount(0);
     await expect(row).toBeVisible();
   });
