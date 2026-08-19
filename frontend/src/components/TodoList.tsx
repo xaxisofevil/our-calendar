@@ -716,6 +716,26 @@ export function TodoList({ todos, people, addError, onAdd, onToggle, onDelete, o
                 <button
                   type="submit"
                   aria-label={text.trim() ? "Send" : "Add item"}
+                  // Real bug, found via direct report: adding several items
+                  // in a row (without closing the modal) caused a visible
+                  // flash, the keyboard dropping and reopening, and the
+                  // page scrolling somewhere unpredictable each time.
+                  // Root cause — tapping any <button> naturally shifts
+                  // focus to it first, by default browser behavior, which
+                  // blurs the text input a moment before submit()'s own
+                  // setTimeout(...).focus() call claws it back — the
+                  // keyboard visibly dismisses and reopens, and each
+                  // fresh focus event re-triggers the browser's own
+                  // "scroll the focused input into view" heuristic,
+                  // landing the page somewhere different each time.
+                  // preventDefault() on pointerdown/mousedown stops that
+                  // default focus-shift *before* it happens (a standard
+                  // technique for exactly this — send buttons in chat UIs
+                  // do the same) while the click/submit still fires
+                  // normally right after — the input now simply never
+                  // loses focus for a keyboard-driven Enter or a tap here.
+                  onPointerDown={(e) => e.preventDefault()}
+                  onMouseDown={(e) => e.preventDefault()}
                   className="grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-full bg-[var(--color-accent)] text-sm leading-none font-bold text-[var(--color-accent-ink)]"
                 >
                   {text.trim() ? <SendIcon /> : "+"}
